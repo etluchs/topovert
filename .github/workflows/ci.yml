@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+jobs:
+  test:
+    name: pytest (incl. doc-sync guards)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+
+      # The runtime has zero pip deps and the unit tests don't shell out to
+      # GDAL/Java, so a plain sync + pytest is the whole gate. tests/test_docs.py
+      # fails the build if the README / cli.py help drift from the code.
+      - name: Sync dev environment
+        run: uv sync
+
+      - name: Run tests
+        run: uv run pytest -q

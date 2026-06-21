@@ -28,6 +28,8 @@ in `cli.py`. Concretely:
   is a `.gdb`, not `.gpkg`; Java ≥ 1.8; Python ≥ 3.11).
 
 Before ending a session that touched code, skim `README.md` and this file for stale claims.
+`tests/test_docs.py` enforces the cheap-to-check parts in CI (README flags exist in `cli.py`, the
+Python pin matches `pyproject`, swissTLM3D is a `.gdb`); extend it when you add a checkable invariant.
 
 ## Stack & architecture
 
