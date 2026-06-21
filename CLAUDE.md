@@ -8,10 +8,11 @@ Topovert converts freely available [Swisstopo](https://www.swisstopo.admin.ch/de
 data into `.IMG` files installable on Garmin navigation devices.
 
 **v1 (current) is one vertical slice:** a local directory of swissALTI3D GeoTIFF elevation tiles
-(EPSG:2056 / LV95) → a hill-shaded Garmin `.IMG`. An **optional** `--tlm <swissTLM3D>` overlays
-vector features — roads/paths, railways, aerialways, watercourses, land cover (water/forest/rock/
-glacier/wetland), buildings, POIs, and walls. Contour lines, splitter tiling, and area
-auto-download are deferred — tracked as beads issues (`bd list`).
+(EPSG:2056 / LV95) → a hill-shaded Garmin `.IMG`. `--tlm <swissTLM3D>` overlays vector features —
+roads/paths, railways, aerialways, watercourses, land cover (water/forest/rock/glacier/wetland),
+buildings, POIs, and walls. Either input is optional: `--tlm` alone makes a **vector-only** map
+(no DEM), `--dem-dir` alone a hillshade-only map. Large extents (up to whole-country) are tiled
+with **splitter** automatically. Contour lines and area auto-download are deferred (`bd list`).
 
 ## Stack & architecture
 
@@ -25,15 +26,17 @@ geospatial/encoding code itself:
   uses `ogr2ogr → GeoJSON → our own OSM writer` rather than `ogr2pbf` (which needs the `osgeo`
   bindings) — see `bd show topovert-rn1`.
 - **mkgmap** (Java) — does all Garmin `.IMG` encoding, including embedding the DEM for hillshading.
+- **splitter** (Java, same source) — tiles a large `.osm` into mkgmap-sized pieces; used automatically
+  when the OSM exceeds `pipeline.SPLIT_NODE_THRESHOLD` nodes.
 
-Pipeline (`src/topovert/pipeline.py:build`): GeoTIFFs → `gdalbuildvrt` mosaic → WGS84 bounds →
-per-1°-tile `gdalwarp` (reproject 2056→4326, resample to SRTM1/3, exact grid) + `gdal_translate -of
-SRTMHGT` → `.osm` (bounds-only, or swissTLM3D vector features when `--tlm` is given) → `mkgmap --dem
---gmapsupp` (single loadable `gmapsupp.img`).
-Modules: `hgt.py` (pure SRTM tiling geometry — fully unit-tested), `gdal_tools.py` (GDAL argv builders
-+ exec), `osm.py` (OSM XML writer + shared node/way serializers), `vector.py` (swissTLM3D → GeoJSON →
-OSM with a data-only `TAG_MAP`), `jars.py` (Java discovery + mkgmap auto-download/cache), `mkgmap.py`
-(the `.IMG` build), `cli.py`.
+Pipeline (`src/topovert/pipeline.py:build`): bounds come from the DEM mosaic (`gdalbuildvrt` →
+`gdalinfo wgs84Extent`) or, with no DEM, from the swissTLM3D extent (`vector.tlm_bounds`). DEM path:
+per-1°-tile `gdalwarp` (2056→4326, SRTM1/3 grid) + `gdal_translate -of SRTMHGT`. Vector path:
+`ogr2ogr` → GeoJSON → `.osm`. Then (splitter if large →) `mkgmap --gmapsupp [--dem]` → single
+loadable `gmapsupp.img`. Modules: `hgt.py` (SRTM tiling geometry — unit-tested), `gdal_tools.py`
+(GDAL argv builders + exec), `osm.py` (OSM XML writer + node/way serializers), `vector.py`
+(swissTLM3D → GeoJSON → OSM, data-only `TAG_MAP`, bounds), `jars.py` (Java + mkgmap/splitter
+download-cache), `splitter.py`, `mkgmap.py` (the `.IMG` build), `cli.py`.
 
 The README's "browser + WASM" idea is **incompatible** with this GDAL+JVM pipeline; v1 is a local CLI.
 
@@ -43,13 +46,16 @@ The README's "browser + WASM" idea is **incompatible** with this GDAL+JVM pipeli
 uv sync                                   # one-time setup (creates .venv + installs dev deps)
 uv run pytest                             # run all unit tests
 uv run pytest tests/test_hgt.py -q        # one test file
-uv run topovert build --dem-dir ./tiles --out ./out/swiss.img   # run the pipeline
+uv run topovert build --dem-dir ./tiles --out ./out/swiss.img   # hillshade-only
+uv run topovert build --tlm ./SWISSTLM3D.gdb --out ./out/ch.img # vector-only (no DEM; splitter as needed)
+uv run topovert build --dem-dir ./tiles --tlm ./tlm.gdb --out ./out/swiss.img   # both
 uv run topovert -v build ... --keep-intermediate                # debug: verbose + keep workdir
 ```
 
-**System prerequisites** (checked at runtime, not pip-installed): GDAL CLI **with the SRTMHGT driver**,
-and a Java **≥ 1.8** runtime. mkgmap.jar is auto-downloaded + SHA-pinned into the per-user cache
-(`~/.cache/topovert/`) on first run; override the source with `TOPOVERT_MKGMAP_URL`.
+**System prerequisites** (checked at runtime, not pip-installed): GDAL CLI (the **SRTMHGT driver** is
+only needed for the DEM/hillshade path) and a Java **≥ 1.8** runtime. mkgmap.jar and splitter.jar are
+auto-downloaded + SHA-pinned into the per-user cache (`~/.cache/topovert/`) on first use; override the
+sources with `TOPOVERT_MKGMAP_URL` / `TOPOVERT_SPLITTER_URL`.
 
 ## Gotchas (hard-won; see `bd memories`)
 
@@ -76,6 +82,10 @@ and a Java **≥ 1.8** runtime. mkgmap.jar is auto-downloaded + SHA-pinned into 
   codes per layer; verify with `ogrinfo -sql "SELECT DISTINCT OBJEKTART FROM <layer>"`). The GDB does
   **not** carry a coded-value domain for `OBJEKTART`, so the integer→label table comes from the
   swisstopo *Objektkatalog swissTLM3D* PDF.
+- **splitter requires osmosis-ordered OSM**: node ids ascending, and all nodes before any way, or
+  it dies with "Node ids are not sorted". `vector._IdAllocator` counts up (positive ids, separate
+  node/way counters) and `build_features_osm` streams nodes and ways to separate temp files then
+  concatenates (nodes block, then ways). splitter is auto-downloaded + SHA-pinned like mkgmap.
 - **Filled water areas come from `TLM_BODENBEDECKUNG` polygons** (`OBJEKTART IN (5,10)` = river surface
   + lake), *not* `TLM_STEHENDES_GEWAESSER`, whose features are unclosed shoreline **lines** that can't
   fill as area. `vector.LAYER_WHERE` filters land cover to water at export time.

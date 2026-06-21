@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from topovert import gdal_tools, mkgmap
+from topovert import gdal_tools, mkgmap, splitter
 from topovert.hgt import Tile
 
 
@@ -34,10 +34,10 @@ def test_translate_hgt_cmd_uses_srtmhgt():
     assert cmd[-2:] == ["t.tif", "N47E008.hgt"]
 
 
-def test_build_img_cmd_points_dem_at_directory():
+def test_build_img_cmd_single_tile_with_dem():
     cmd = mkgmap.build_img_cmd(
-        "java", Path("mkgmap.jar"), Path("bounds.osm"), Path("hgt"), Path("out"),
-        map_name="swiss",
+        "java", Path("mkgmap.jar"), [Path("bounds.osm")], Path("out"),
+        map_name="swiss", hgt_dir=Path("hgt"),
     )
     assert cmd[:3] == ["java", "-jar", "mkgmap.jar"]
     assert "--dem=hgt" in cmd
@@ -45,4 +45,37 @@ def test_build_img_cmd_points_dem_at_directory():
     # must build a self-contained gmapsupp.img (not a bare detail tile)
     assert "--gmapsupp" in cmd
     assert f"--family-id={mkgmap.FAMILY_ID}" in cmd
+    assert f"--mapname={mkgmap.MAP_NUMBER}" in cmd  # single tile is named
     assert cmd[-1] == "bounds.osm"
+
+
+def test_build_img_cmd_vector_only_has_no_dem():
+    cmd = mkgmap.build_img_cmd(
+        "java", Path("mkgmap.jar"), [Path("features.osm")], Path("out"),
+        map_name="swiss",  # hgt_dir defaults to None
+    )
+    assert not any(a.startswith("--dem=") for a in cmd)
+    assert "--gmapsupp" in cmd
+
+
+def test_build_img_cmd_split_tiles_drop_mapname():
+    inputs = [Path("63240001.osm.pbf"), Path("63240002.osm.pbf")]
+    cmd = mkgmap.build_img_cmd(
+        "java", Path("mkgmap.jar"), inputs, Path("out"),
+        map_name="swiss", mapname=None,  # tiles carry their own numbers
+    )
+    assert not any(a.startswith("--mapname=") for a in cmd)
+    assert cmd[-2:] == ["63240001.osm.pbf", "63240002.osm.pbf"]
+
+
+def test_split_cmd_outputs_pbf_tiles():
+    cmd = splitter.split_cmd(
+        "java", Path("splitter.jar"), Path("features.osm"), Path("split"),
+        max_nodes=1_600_000, mapid="63240001",
+    )
+    assert cmd[:3] == ["java", "-jar", "splitter.jar"]
+    assert "--output=pbf" in cmd
+    assert "--output-dir=split" in cmd
+    assert "--max-nodes=1600000" in cmd
+    assert "--mapid=63240001" in cmd
+    assert cmd[-1] == "features.osm"

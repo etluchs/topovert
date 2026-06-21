@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import TopovertError
-from . import gdal_tools, jars, mkgmap, osm, vector
+from . import gdal_tools, jars, mkgmap, osm, splitter, vector
 from .hgt import DEFAULT_RESOLUTION, DEM_RESOLUTIONS, tiles_for_bounds
 
 log = logging.getLogger(__name__)
@@ -23,6 +23,10 @@ DEFAULT_SOURCE_EPSG = 2056  # swissALTI3D / LV95
 # (as voids where no source data exists), avoiding mkgmap's "file not found,
 # height 0" edge artifact. ~0.05 deg (~5.5 km) comfortably exceeds mkgmap's border.
 DEM_TILE_MARGIN_DEG = 0.05
+
+# Above this many OSM nodes a single mkgmap tile is impractical, so the OSM is
+# first tiled with splitter. Whole-canton/country swissTLM3D extents far exceed it.
+SPLIT_NODE_THRESHOLD = 2_000_000
 
 
 @dataclass
@@ -42,7 +46,7 @@ def _find_geotiffs(dem_dir: Path) -> list[Path]:
 
 
 def build(
-    dem_dir: Path,
+    dem_dir: Path | None,
     out_path: Path,
     *,
     resolution: str = DEFAULT_RESOLUTION,
@@ -51,13 +55,15 @@ def build(
     map_name: str = "topovert",
     tlm_path: Path | None = None,
     tlm_layers: list[str] | None = None,
+    max_nodes: int = splitter.DEFAULT_MAX_NODES,
     keep_intermediate: bool = False,
 ) -> BuildResult:
-    """Convert a directory of DEM GeoTIFFs into a single hill-shaded ``.IMG``.
+    """Build a Garmin ``.IMG`` from a DEM and/or swissTLM3D vectors.
 
-    Steps: preflight -> mosaic (VRT) -> compute WGS84 bounds -> per-tile warp +
-    SRTMHGT conversion -> OSM (bounds-only, or swissTLM3D vector features when
-    ``tlm_path`` is given) -> mkgmap ``--dem`` -> copy result.
+    At least one of ``dem_dir`` / ``tlm_path`` is required. Steps: preflight ->
+    bounds (from the DEM mosaic, else from the TLM extent) -> optional per-tile
+    HGT -> OSM (bounds-only, or swissTLM3D vector features) -> splitter when the
+    OSM is large -> mkgmap (``--dem`` when a DEM is present) -> copy result.
     """
     if resolution not in DEM_RESOLUTIONS:
         raise TopovertError(
@@ -65,10 +71,14 @@ def build(
         )
     samples = DEM_RESOLUTIONS[resolution]
 
+    if dem_dir is None and tlm_path is None:
+        raise TopovertError("nothing to build: pass --dem-dir and/or --tlm")
+
     # Preflight: fail fast before touching the (slow) toolchain.
-    gdal_tools.check_available()
-    tifs = _find_geotiffs(dem_dir)
+    gdal_tools.check_available(need_hgt=dem_dir is not None)
     java = jars.find_java()
+    tifs = _find_geotiffs(dem_dir) if dem_dir is not None else []
+    layers = tlm_layers or list(vector.DEFAULT_TLM_LAYERS)
     if tlm_path is not None:
         tlm_path = tlm_path.resolve()
         if not tlm_path.exists():
@@ -80,36 +90,57 @@ def build(
     workdir = Path(tempfile.mkdtemp(prefix="topovert-"))
     log.debug("workdir: %s", workdir)
     try:
-        vrt = gdal_tools.build_vrt(tifs, workdir / "mosaic.vrt")
-        bounds = gdal_tools.wgs84_bounds(vrt)
-        log.info("input covers WGS84 bounds %s", tuple(round(b, 5) for b in bounds))
+        # --- bounds, and the optional DEM (HGT tiles) -----------------------
+        tiles = []
+        hgt_dir: Path | None = None
+        if dem_dir is not None:
+            vrt = gdal_tools.build_vrt(tifs, workdir / "mosaic.vrt")
+            bounds = gdal_tools.wgs84_bounds(vrt)
+            log.info("DEM covers WGS84 bounds %s", tuple(round(b, 5) for b in bounds))
+            min_lon, min_lat, max_lon, max_lat = bounds
+            m = DEM_TILE_MARGIN_DEG
+            tiles = tiles_for_bounds(min_lon - m, min_lat - m, max_lon + m, max_lat + m)
+            log.info("generating %d HGT tile(s): %s", len(tiles), [t.name for t in tiles])
+            hgt_dir = workdir / "hgt"
+            hgt_dir.mkdir()
+            for tile in tiles:
+                gdal_tools.make_hgt_tile(
+                    vrt, tile, samples, hgt_dir,
+                    source_epsg=source_epsg, resampling=resampling,
+                )
+        else:
+            bounds = vector.tlm_bounds(tlm_path, layers, source_epsg=source_epsg)
+            log.info("swissTLM3D covers WGS84 bounds %s", tuple(round(b, 5) for b in bounds))
 
-        min_lon, min_lat, max_lon, max_lat = bounds
-        m = DEM_TILE_MARGIN_DEG
-        tiles = tiles_for_bounds(min_lon - m, min_lat - m, max_lon + m, max_lat + m)
-        log.info("generating %d HGT tile(s): %s", len(tiles), [t.name for t in tiles])
-        hgt_dir = workdir / "hgt"
-        hgt_dir.mkdir()
-        for tile in tiles:
-            gdal_tools.make_hgt_tile(
-                vrt, tile, samples, hgt_dir,
-                source_epsg=source_epsg, resampling=resampling,
-            )
-
+        # --- OSM (vector features, else minimal bounds) ---------------------
         if tlm_path is not None:
-            layers = tlm_layers or list(vector.DEFAULT_TLM_LAYERS)
             log.info("converting swissTLM3D features from %s: %s", tlm_path, layers)
-            map_osm = vector.build_features_osm(
-                tlm_path, layers, bounds, workdir / "features.osm",
-                source_epsg=source_epsg,
+            map_osm = workdir / "features.osm"
+            n_nodes = vector.build_features_osm(
+                tlm_path, layers, bounds, map_osm,
+                source_epsg=source_epsg, keep_geojson=keep_intermediate,
             )
         else:
             map_osm = osm.write_bounds_osm(bounds, workdir / "bounds.osm", name=map_name)
+            n_nodes = 0
 
+        # --- compile: splitter (large) then mkgmap, or mkgmap directly ------
         jar = jars.ensure_mkgmap()
-        img = mkgmap.build_img(
-            java, jar, map_osm, hgt_dir, workdir / "out", map_name=map_name
-        )
+        out_dir = workdir / "out"
+        if n_nodes > SPLIT_NODE_THRESHOLD:
+            log.info("%d node(s) exceeds split threshold; tiling with splitter", n_nodes)
+            inputs = splitter.split(
+                java, jars.ensure_splitter(), map_osm, workdir / "split",
+                max_nodes=max_nodes,
+            )
+            img = mkgmap.build_img(
+                java, jar, inputs, out_dir,
+                map_name=map_name, hgt_dir=hgt_dir, mapname=None,
+            )
+        else:
+            img = mkgmap.build_img(
+                java, jar, [map_osm], out_dir, map_name=map_name, hgt_dir=hgt_dir,
+            )
 
         shutil.copyfile(img, out_path)
         log.info("wrote %s", out_path)

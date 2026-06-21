@@ -38,8 +38,12 @@ def _run(cmd: list[str]) -> subprocess.CompletedProcess[str]:
     return proc
 
 
-def check_available() -> None:
-    """Raise if any required GDAL CLI tool, or the SRTMHGT driver, is missing."""
+def check_available(*, need_hgt: bool = True) -> None:
+    """Raise if any required GDAL CLI tool is missing.
+
+    ``need_hgt`` additionally requires the SRTMHGT driver (only the DEM path needs
+    it; a vector-only ``--tlm`` build does not).
+    """
     missing = [t for t in REQUIRED_TOOLS if shutil.which(t) is None]
     if missing:
         raise TopovertError(
@@ -47,8 +51,7 @@ def check_available() -> None:
             + ", ".join(missing)
             + ".\nInstall GDAL (e.g. `apt install gdal-bin`, `brew install gdal`)."
         )
-    formats = _run(["gdalinfo", "--formats"]).stdout
-    if "SRTMHGT" not in formats:
+    if need_hgt and "SRTMHGT" not in _run(["gdalinfo", "--formats"]).stdout:
         raise TopovertError(
             "this GDAL build lacks the SRTMHGT driver, which topovert needs to "
             "write .hgt tiles. Install a full GDAL build."

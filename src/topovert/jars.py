@@ -25,14 +25,23 @@ from . import TopovertError
 
 log = logging.getLogger(__name__)
 
-# Pinned mkgmap release. mkgmap.org.uk prunes old revisions, so when bumping this
-# you MUST update both the URL and the SHA-256 (download the zip and run
-# `sha256sum`). The SHA is enforced; a mismatch aborts the download.
+# Pinned mkgmap/splitter releases. mkgmap.org.uk prunes old revisions, so when
+# bumping either you MUST update both the URL and the SHA-256 (download the zip
+# and run `sha256sum`). The SHA is enforced; a mismatch aborts the download.
 MKGMAP_URL = os.environ.get(
     "TOPOVERT_MKGMAP_URL", "https://www.mkgmap.org.uk/download/mkgmap-r4924.zip"
 )
 MKGMAP_SHA256: str | None = (
     "b2170799b61a95d4fc258e8e4fb4e21396809e0390789178f94c77109f8e0d84"
+)
+
+# splitter tiles huge OSM extents into mkgmap-sized pieces (needed for large
+# swissTLM3D areas). Same `splitter-rXXXX/{splitter.jar,lib/}` zip layout.
+SPLITTER_URL = os.environ.get(
+    "TOPOVERT_SPLITTER_URL", "https://www.mkgmap.org.uk/download/splitter-r654.zip"
+)
+SPLITTER_SHA256: str | None = (
+    "87b0ca0e827bef556341f66ec8dd7f48eea2a479d1ff3659caa5d6f0e9a9b68c"
 )
 
 
@@ -82,13 +91,13 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def _extract_distribution(zip_path: Path, dst_dir: Path) -> Path:
-    """Extract the whole mkgmap distribution into ``dst_dir``, returning the jar.
+def _extract_distribution(zip_path: Path, dst_dir: Path, jar_filename: str) -> Path:
+    """Extract the whole distribution into ``dst_dir``, returning the wanted jar.
 
-    mkgmap.jar's manifest has ``Class-Path: lib/...`` relative to the jar, so the
-    bundled dependency jars (osmpbf, protobuf, fastutil) must sit alongside it.
-    The zip nests everything under a top ``mkgmap-rXXXX/`` directory, which we
-    strip so the layout becomes ``dst_dir/mkgmap.jar`` + ``dst_dir/lib/*.jar``.
+    mkgmap.jar / splitter.jar have ``Class-Path: lib/...`` in their manifest, so
+    the bundled dependency jars (osmpbf, protobuf, fastutil, ...) must sit beside
+    them. The zip nests everything under a top ``<tool>-rXXXX/`` directory, which
+    we strip so the layout becomes ``dst_dir/<jar>`` + ``dst_dir/lib/*.jar``.
     """
     jar_path: Path | None = None
     with zipfile.ZipFile(zip_path) as zf:
@@ -102,47 +111,57 @@ def _extract_distribution(zip_path: Path, dst_dir: Path) -> Path:
             target.parent.mkdir(parents=True, exist_ok=True)
             with zf.open(member) as src, target.open("wb") as out:
                 shutil.copyfileobj(src, out)
-            if rel == "mkgmap.jar":
+            if rel == jar_filename:
                 jar_path = target
     if jar_path is None:
-        raise TopovertError(f"mkgmap.jar not found inside {MKGMAP_URL}")
+        raise TopovertError(f"{jar_filename} not found inside {zip_path}")
     return jar_path
+
+
+def _ensure_jar(name: str, url: str, sha256: str | None, jar_filename: str) -> Path:
+    """Return a path to ``jar_filename``, downloading + caching ``url`` if needed."""
+    dist_dir = cache_dir() / name
+    jar = dist_dir / jar_filename
+    if jar.exists():
+        log.debug("using cached %s: %s", jar_filename, jar)
+        return jar
+
+    dist_dir.mkdir(parents=True, exist_ok=True)
+    log.info("downloading %s from %s ...", name, url)
+    with tempfile.TemporaryDirectory() as tmp:
+        zip_path = Path(tmp) / f"{name}.zip"
+        try:
+            urllib.request.urlretrieve(url, zip_path)
+        except OSError as exc:
+            raise TopovertError(
+                f"failed to download {name} from {url}: {exc}\n"
+                f"Set the override env var to a reachable mirror if needed."
+            ) from exc
+
+        digest = _sha256(zip_path)
+        if sha256 is None:
+            log.warning(
+                "%s SHA-256 is not pinned; downloaded digest is %s "
+                "(pin it in jars.py to enforce integrity)",
+                name, digest,
+            )
+        elif digest != sha256:
+            raise TopovertError(
+                f"{name} download digest mismatch:\n  expected {sha256}\n"
+                f"  got      {digest}"
+            )
+
+        jar = _extract_distribution(zip_path, dist_dir, jar_filename)
+
+    log.info("cached %s at %s", name, jar)
+    return jar
 
 
 def ensure_mkgmap() -> Path:
     """Return a path to mkgmap.jar, downloading + caching it if necessary."""
-    dist_dir = cache_dir() / "mkgmap"
-    jar = dist_dir / "mkgmap.jar"
-    if jar.exists():
-        log.debug("using cached mkgmap.jar: %s", jar)
-        return jar
+    return _ensure_jar("mkgmap", MKGMAP_URL, MKGMAP_SHA256, "mkgmap.jar")
 
-    dist_dir.mkdir(parents=True, exist_ok=True)
-    log.info("downloading mkgmap from %s ...", MKGMAP_URL)
-    with tempfile.TemporaryDirectory() as tmp:
-        zip_path = Path(tmp) / "mkgmap.zip"
-        try:
-            urllib.request.urlretrieve(MKGMAP_URL, zip_path)
-        except OSError as exc:
-            raise TopovertError(
-                f"failed to download mkgmap from {MKGMAP_URL}: {exc}\n"
-                "Set TOPOVERT_MKGMAP_URL to a reachable mirror if needed."
-            ) from exc
 
-        digest = _sha256(zip_path)
-        if MKGMAP_SHA256 is None:
-            log.warning(
-                "mkgmap SHA-256 is not pinned; downloaded digest is %s "
-                "(pin it in jars.MKGMAP_SHA256 to enforce integrity)",
-                digest,
-            )
-        elif digest != MKGMAP_SHA256:
-            raise TopovertError(
-                f"mkgmap download digest mismatch:\n  expected {MKGMAP_SHA256}\n"
-                f"  got      {digest}"
-            )
-
-        jar = _extract_distribution(zip_path, dist_dir)
-
-    log.info("cached mkgmap at %s", jar)
-    return jar
+def ensure_splitter() -> Path:
+    """Return a path to splitter.jar, downloading + caching it if necessary."""
+    return _ensure_jar("splitter", SPLITTER_URL, SPLITTER_SHA256, "splitter.jar")

@@ -28,8 +28,9 @@ def _build_parser() -> argparse.ArgumentParser:
         help="build a hill-shaded .IMG from a directory of DEM GeoTIFFs",
     )
     b.add_argument(
-        "--dem-dir", type=Path, required=True,
-        help="directory of swissALTI3D GeoTIFF tiles (EPSG:2056)",
+        "--dem-dir", type=Path, default=None,
+        help="directory of swissALTI3D GeoTIFF tiles (EPSG:2056) for hillshading; "
+             "optional if --tlm is given",
     )
     b.add_argument(
         "--out", type=Path, required=True, help="output .IMG path",
@@ -60,8 +61,13 @@ def _build_parser() -> argparse.ArgumentParser:
              "core-nav set when given",
     )
     b.add_argument(
+        "--max-nodes", type=int, default=None,
+        help="splitter tile size in OSM nodes for large extents (default: "
+             "splitter's own ~1.6M); only used when the map needs tiling",
+    )
+    b.add_argument(
         "--keep-intermediate", action="store_true",
-        help="keep the temp workdir (VRT, HGT tiles, OSM) for inspection",
+        help="keep the temp workdir (VRT, HGT tiles, OSM, GeoJSON) for inspection",
     )
     b.set_defaults(func=_cmd_build)
     return parser
@@ -77,9 +83,11 @@ def _cmd_build(args: argparse.Namespace) -> int:
         map_name=args.name,
         tlm_path=args.tlm,
         tlm_layers=args.tlm_layers,
+        **({"max_nodes": args.max_nodes} if args.max_nodes else {}),
         keep_intermediate=args.keep_intermediate,
     )
-    print(f"Wrote {result.out_path} ({len(result.tiles)} DEM tile(s)).")
+    dem = f"{len(result.tiles)} DEM tile(s)" if result.tiles else "no DEM"
+    print(f"Wrote {result.out_path} ({dem}).")
     return 0
 
 

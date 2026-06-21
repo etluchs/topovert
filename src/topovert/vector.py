@@ -20,12 +20,20 @@ from __future__ import annotations
 
 import json
 import logging
+import re
+import shutil
+import subprocess
 from collections.abc import Iterable, Iterator
 from pathlib import Path
 
 from . import TopovertError, gdal_tools, osm
 
 log = logging.getLogger(__name__)
+
+# ogrinfo -so prints e.g. "Extent: (2600000.000, 1190000.000) - (2610000.000, 1200000.000)"
+_EXTENT_RE = re.compile(
+    r"Extent:\s*\(\s*([-\d.]+),\s*([-\d.]+)\s*\)\s*-\s*\(\s*([-\d.]+),\s*([-\d.]+)\s*\)"
+)
 
 # swissTLM3D ships as EPSG:2056 (LV95), same as the DEM.
 DEFAULT_SOURCE_EPSG = 2056
@@ -256,21 +264,31 @@ def tags_for(layer: str, props: dict) -> dict[str, str] | None:
 
 
 class _IdAllocator:
-    """Hands out the negative ids OSM uses for not-yet-uploaded objects."""
+    """Hands out ascending positive ids.
+
+    ``splitter`` requires node ids sorted ascending, so we count up (not the usual
+    negative OSM convention). Nodes and ways are separate OSM id namespaces and
+    get independent counters.
+    """
 
     def __init__(self) -> None:
-        self._n = 0
+        self._node = 0
+        self._way = 0
 
-    def next(self) -> int:
-        self._n -= 1
-        return self._n
+    def node(self) -> int:
+        self._node += 1
+        return self._node
+
+    def way(self) -> int:
+        self._way += 1
+        return self._way
 
 
 def _coords_to_nodes(coords: list, ids: _IdAllocator, out: list[str]) -> list[int]:
     """Emit a ``<node>`` per coordinate; return their ids in order."""
     node_ids: list[int] = []
     for lon, lat, *_ in coords:
-        nid = ids.next()
+        nid = ids.node()
         out.append(osm.node_xml(nid, float(lat), float(lon)))
         node_ids.append(nid)
     return node_ids
@@ -282,7 +300,7 @@ def _ring_way(ring: list, ids: _IdAllocator, tags: dict[str, str], out: list[str
     node_ids = _coords_to_nodes(pts, ids, out)
     if len(node_ids) < 3:
         return
-    out.append(osm.way_xml(ids.next(), node_ids + [node_ids[0]], tags))
+    out.append(osm.way_xml(ids.way(), node_ids + [node_ids[0]], tags))
 
 
 def feature_to_osm(layer: str, feature: dict, ids: _IdAllocator) -> list[str]:
@@ -299,19 +317,19 @@ def feature_to_osm(layer: str, feature: dict, ids: _IdAllocator) -> list[str]:
     out: list[str] = []
     if gtype == "Point":
         lon, lat, *_ = coords
-        out.append(osm.node_xml(ids.next(), float(lat), float(lon), tags))
+        out.append(osm.node_xml(ids.node(), float(lat), float(lon), tags))
     elif gtype == "MultiPoint":
         for lon, lat, *_ in coords:
-            out.append(osm.node_xml(ids.next(), float(lat), float(lon), tags))
+            out.append(osm.node_xml(ids.node(), float(lat), float(lon), tags))
     elif gtype == "LineString":
         node_ids = _coords_to_nodes(coords, ids, out)
         if len(node_ids) >= 2:
-            out.append(osm.way_xml(ids.next(), node_ids, tags))
+            out.append(osm.way_xml(ids.way(), node_ids, tags))
     elif gtype == "MultiLineString":
         for line in coords:
             node_ids = _coords_to_nodes(line, ids, out)
             if len(node_ids) >= 2:
-                out.append(osm.way_xml(ids.next(), node_ids, tags))
+                out.append(osm.way_xml(ids.way(), node_ids, tags))
     elif gtype == "Polygon":
         # Slice 1: outer ring only (holes deferred — see rn1 follow-ups).
         if coords:
@@ -352,6 +370,57 @@ def ogr_geojson_cmd(
     return cmd
 
 
+def _reproject(
+    points: list[tuple[float, float]], src_epsg: int, dst_epsg: int
+) -> list[tuple[float, float]]:
+    """Reproject ``(x, y)`` points with the ``gdaltransform`` CLI (no bindings)."""
+    stdin = "\n".join(f"{x} {y}" for x, y in points) + "\n"
+    proc = subprocess.run(
+        ["gdaltransform", "-s_srs", f"EPSG:{src_epsg}", "-t_srs", f"EPSG:{dst_epsg}",
+         "-output_xy"],
+        input=stdin, capture_output=True, text=True,
+    )
+    if proc.returncode != 0:
+        raise TopovertError(f"gdaltransform failed:\n{proc.stderr.strip()}")
+    out: list[tuple[float, float]] = []
+    for line in proc.stdout.splitlines():
+        parts = line.split()
+        if len(parts) >= 2:
+            out.append((float(parts[0]), float(parts[1])))
+    return out
+
+
+def tlm_bounds(
+    src: Path, layers: Iterable[str], *, source_epsg: int = DEFAULT_SOURCE_EPSG
+) -> tuple[float, float, float, float]:
+    """WGS84 ``(min_lon, min_lat, max_lon, max_lat)`` union extent of ``layers``.
+
+    Used for vector-only builds (no DEM to derive bounds from). Reads each layer's
+    native-CRS extent via ``ogrinfo`` and reprojects the corners to WGS84.
+    """
+    xmin = ymin = float("inf")
+    xmax = ymax = float("-inf")
+    for layer in layers:
+        try:
+            out = gdal_tools._run(["ogrinfo", "-so", str(src), layer]).stdout
+        except TopovertError:
+            continue
+        m = _EXTENT_RE.search(out)
+        if not m:
+            continue
+        x0, y0, x1, y1 = (float(v) for v in m.groups())
+        xmin, ymin = min(xmin, x0), min(ymin, y0)
+        xmax, ymax = max(xmax, x1), max(ymax, y1)
+    if xmin == float("inf"):
+        raise TopovertError(f"could not determine extent of {src} from {list(layers)}")
+
+    corners = [(xmin, ymin), (xmax, ymin), (xmax, ymax), (xmin, ymax)]
+    lonlat = _reproject(corners, source_epsg, 4326)
+    lons = [p[0] for p in lonlat]
+    lats = [p[1] for p in lonlat]
+    return (min(lons), min(lats), max(lons), max(lats))
+
+
 def build_features_osm(
     src: Path,
     layers: Iterable[str],
@@ -359,21 +428,29 @@ def build_features_osm(
     dst: Path,
     *,
     source_epsg: int = DEFAULT_SOURCE_EPSG,
-) -> Path:
+    keep_geojson: bool = False,
+) -> int:
     """Convert ``layers`` of swissTLM3D ``src`` into one combined ``dst`` ``.osm``.
 
     Reprojects each layer to GeoJSONSeq with ``ogr2ogr`` then streams it through
     :func:`geojson_to_osm`. A layer missing from the source is warned and skipped
-    (deliveries vary) rather than failing the whole build.
+    (deliveries vary) rather than failing the whole build. Returns the number of
+    ``<node>`` elements written (the metric that decides whether to run splitter).
+    Per-layer GeoJSON is deleted after use unless ``keep_geojson`` (these can be
+    gigabytes for a whole-country extent).
     """
     if not src.exists():
         raise TopovertError(f"--tlm source not found: {src}")
 
     ids = _IdAllocator()
     scratch = dst.parent
-    with dst.open("w", encoding="utf-8") as fh:
-        fh.write(osm.OSM_HEADER)
-        fh.write(osm.bounds_element(bounds))
+    # splitter wants the OSM osmosis-ordered: all nodes (ascending id) then all
+    # ways. Stream nodes and ways to separate temp files, then concatenate.
+    nodes_path = scratch / (dst.name + ".nodes")
+    ways_path = scratch / (dst.name + ".ways")
+    nodes = 0
+    with nodes_path.open("w", encoding="utf-8") as nf, \
+            ways_path.open("w", encoding="utf-8") as wf:
         for layer in layers:
             geojson = scratch / f"{layer}.geojsonl"
             try:
@@ -384,11 +461,27 @@ def build_features_osm(
             except TopovertError as exc:
                 log.warning("skipping swissTLM3D layer %r: %s", layer, exc)
                 continue
+            elements = 0
             with geojson.open(encoding="utf-8") as gj:
-                count = 0
                 for fragment in geojson_to_osm(gj, layer, ids):
-                    fh.write(fragment)
-                    count += 1
-                log.info("layer %s -> %d OSM element(s)", layer, count)
+                    if fragment.startswith("  <node"):
+                        nf.write(fragment)
+                        nodes += 1
+                    else:
+                        wf.write(fragment)
+                    elements += 1
+            log.info("layer %s -> %d OSM element(s)", layer, elements)
+            if not keep_geojson:
+                geojson.unlink(missing_ok=True)
+
+    with dst.open("w", encoding="utf-8") as fh:
+        fh.write(osm.OSM_HEADER)
+        fh.write(osm.bounds_element(bounds))
+        for part in (nodes_path, ways_path):
+            with part.open(encoding="utf-8") as pf:
+                shutil.copyfileobj(pf, fh)
         fh.write(osm.OSM_FOOTER)
-    return dst
+    if not keep_geojson:
+        nodes_path.unlink(missing_ok=True)
+        ways_path.unlink(missing_ok=True)
+    return nodes

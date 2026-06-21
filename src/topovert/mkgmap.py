@@ -26,43 +26,53 @@ MAP_NUMBER = "63240001"
 def build_img_cmd(
     java: str,
     jar: Path,
-    osm_path: Path,
-    hgt_dir: Path,
+    osm_inputs: list[Path],
     out_dir: Path,
     *,
     map_name: str,
+    hgt_dir: Path | None = None,
+    mapname: str | None = MAP_NUMBER,
 ) -> list[str]:
     """Argv for the mkgmap run.
 
-    ``--gmapsupp`` makes the loadable single-file product; ``--dem`` points at the
-    directory of .hgt tiles.
+    ``--gmapsupp`` makes the loadable single-file product. ``hgt_dir`` adds
+    ``--dem`` for hillshading (omit for a vector-only map). ``osm_inputs`` is one
+    ``.osm`` (single tile) or many ``.osm.pbf`` (splitter tiles); for the latter
+    pass ``mapname=None`` so mkgmap takes each tile's number from its filename.
     """
-    return [
+    cmd = [
         java, "-jar", str(jar),
         "--output-dir=" + str(out_dir),
         "--description=" + map_name,
         "--family-id=" + str(FAMILY_ID),
         "--product-id=" + str(PRODUCT_ID),
-        "--mapname=" + MAP_NUMBER,
         "--country-name=Switzerland",
         "--gmapsupp",
-        "--dem=" + str(hgt_dir),
-        str(osm_path),
     ]
+    if mapname is not None:
+        cmd.append("--mapname=" + mapname)
+    if hgt_dir is not None:
+        cmd.append("--dem=" + str(hgt_dir))
+    cmd += [str(p) for p in osm_inputs]
+    return cmd
 
 
 def build_img(
     java: str,
     jar: Path,
-    osm_path: Path,
-    hgt_dir: Path,
+    osm_inputs: list[Path],
     out_dir: Path,
     *,
     map_name: str = "topovert",
+    hgt_dir: Path | None = None,
+    mapname: str | None = MAP_NUMBER,
 ) -> Path:
-    """Run mkgmap and return the path to the produced ``.img``."""
+    """Run mkgmap and return the path to the produced ``gmapsupp.img``."""
     out_dir.mkdir(parents=True, exist_ok=True)
-    cmd = build_img_cmd(java, jar, osm_path, hgt_dir, out_dir, map_name=map_name)
+    cmd = build_img_cmd(
+        java, jar, osm_inputs, out_dir,
+        map_name=map_name, hgt_dir=hgt_dir, mapname=mapname,
+    )
     log.debug("run: %s", " ".join(cmd))
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
