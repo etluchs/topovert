@@ -30,10 +30,10 @@ are planned next.
 ## Usage
 
 ```bash
-python3 -m venv .venv && .venv/bin/pip install -e .
+uv sync
 
 # Point at a folder of swissALTI3D *.tif tiles; get a hill-shaded .IMG
-.venv/bin/topovert build --dem-dir ./swissalti3d_tiles --out ./out/swiss.img
+uv run topovert build --dem-dir ./swissalti3d_tiles --out ./out/swiss.img
 ```
 
 Then copy the `.IMG` to your Garmin device (or load it in BaseCamp) to see the shaded relief.

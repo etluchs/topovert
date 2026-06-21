@@ -33,11 +33,11 @@ The README's "browser + WASM" idea is **incompatible** with this GDAL+JVM pipeli
 ## Commands
 
 ```bash
-python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"   # one-time setup
-.venv/bin/pytest                          # run all unit tests
-.venv/bin/pytest tests/test_hgt.py -q     # one test file
-.venv/bin/topovert build --dem-dir ./tiles --out ./out/swiss.img   # run the pipeline
-.venv/bin/topovert -v build ... --keep-intermediate                # debug: verbose + keep workdir
+uv sync                                   # one-time setup (creates .venv + installs dev deps)
+uv run pytest                             # run all unit tests
+uv run pytest tests/test_hgt.py -q        # one test file
+uv run topovert build --dem-dir ./tiles --out ./out/swiss.img   # run the pipeline
+uv run topovert -v build ... --keep-intermediate                # debug: verbose + keep workdir
 ```
 
 **System prerequisites** (checked at runtime, not pip-installed): GDAL CLI **with the SRTMHGT driver**,

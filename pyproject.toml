@@ -18,7 +18,7 @@ keywords = ["garmin", "swisstopo", "gis", "mkgmap", "topographic", "dem"]
 # (GDAL CLI, a Java >= 1.8 runtime) are checked at runtime, not pip-installed.
 dependencies = []
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = ["pytest>=8"]
 
 [project.scripts]
