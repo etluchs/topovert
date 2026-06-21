@@ -51,7 +51,7 @@ def _build_parser() -> argparse.ArgumentParser:
     b.add_argument("--name", default="topovert", help="map name/description")
     b.add_argument(
         "--tlm", type=Path, default=None,
-        help="optional swissTLM3D GeoPackage (.gpkg) to add vector features "
+        help="optional swissTLM3D GeoDatabase (.gdb) to add vector features "
              "(roads, water, buildings); omit for a hillshade-only map",
     )
     b.add_argument(
