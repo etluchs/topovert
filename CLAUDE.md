@@ -28,7 +28,8 @@ geospatial/encoding code itself:
 
 Pipeline (`src/topovert/pipeline.py:build`): GeoTIFFs → `gdalbuildvrt` mosaic → WGS84 bounds →
 per-1°-tile `gdalwarp` (reproject 2056→4326, resample to SRTM1/3, exact grid) + `gdal_translate -of
-SRTMHGT` → `.osm` (bounds-only, or swissTLM3D vector features when `--tlm` is given) → `mkgmap --dem`.
+SRTMHGT` → `.osm` (bounds-only, or swissTLM3D vector features when `--tlm` is given) → `mkgmap --dem
+--gmapsupp` (single loadable `gmapsupp.img`).
 Modules: `hgt.py` (pure SRTM tiling geometry — fully unit-tested), `gdal_tools.py` (GDAL argv builders
 + exec), `osm.py` (OSM XML writer + shared node/way serializers), `vector.py` (swissTLM3D → GeoJSON →
 OSM with a data-only `TAG_MAP`), `jars.py` (Java discovery + mkgmap auto-download/cache), `mkgmap.py`
@@ -63,6 +64,10 @@ and a Java **≥ 1.8** runtime. mkgmap.jar is auto-downloaded + SHA-pinned into 
   its docstring for the arithmetic. Verify output tiles with `gdalinfo` (expect 3601×3601, Int16, EPSG:4326).
 - **mkgmap.org.uk prunes old revisions**, so a pinned URL 404s eventually. Bumping the version means
   updating **both** `jars.MKGMAP_URL` and `jars.MKGMAP_SHA256` (download + `sha256sum`).
+- **mkgmap must run with `--gmapsupp`**: a bare detail tile (`63240001.img`) renders **empty** on a
+  Garmin device and makes QMapShack warn "Mapping a file beyond its size is not portable". `--gmapsupp`
+  (+ `--family-id`/`--product-id`/`--mapname`) bundles detail + overview into the single loadable
+  `gmapsupp.img` we copy to `--out`. On a Fenix, drop it in the device's `Garmin/` folder.
 - **swissTLM3D `OBJEKTART` is an integer code, not a German string** (`vector.py` maps the documented
   codes per layer; verify with `ogrinfo -sql "SELECT DISTINCT OBJEKTART FROM <layer>"`). The GDB does
   **not** carry a coded-value domain for `OBJEKTART`, so the integer→label table comes from the

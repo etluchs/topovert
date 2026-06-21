@@ -42,4 +42,7 @@ def test_build_img_cmd_points_dem_at_directory():
     assert cmd[:3] == ["java", "-jar", "mkgmap.jar"]
     assert "--dem=hgt" in cmd
     assert "--output-dir=out" in cmd
+    # must build a self-contained gmapsupp.img (not a bare detail tile)
+    assert "--gmapsupp" in cmd
+    assert f"--family-id={mkgmap.FAMILY_ID}" in cmd
     assert cmd[-1] == "bounds.osm"
