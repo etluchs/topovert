@@ -24,6 +24,7 @@ venv/
 *.img
 *.hgt
 out/
+logs/
 sample/
 
 # Local sample/test datasets (large swissALTI3D downloads — not for VCS)
