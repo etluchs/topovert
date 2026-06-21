@@ -30,38 +30,89 @@ log = logging.getLogger(__name__)
 # swissTLM3D ships as EPSG:2056 (LV95), same as the DEM.
 DEFAULT_SOURCE_EPSG = 2056
 
-# Layer names vary slightly between swissTLM3D deliveries (and case), so we
-# classify by a substring of the layer name rather than pinning exact names.
-# Verify the real names with `ogrinfo -so <gpkg>` (see the rn1 plan).
+# Default core-nav layers (exact swissTLM3D GDB names, uppercase). Water *areas*
+# come from TLM_BODENBEDECKUNG polygons (lakes + wide rivers), filtered to water
+# OBJEKTART at the source (see LAYER_WHERE) — the TLM_STEHENDES_GEWAESSER layer is
+# unclosed shoreline *lines* and can't fill as area without polygonisation
+# (follow-up). Classification (:func:`_layer_kind`) is case-insensitive.
 DEFAULT_TLM_LAYERS = (
-    "tlm_strasse",
-    "tlm_fliessgewaesser",
-    "tlm_stehende_gewaesser",
-    "tlm_gebaeude_footprint",
+    "TLM_STRASSE",
+    "TLM_FLIESSGEWAESSER",
+    "TLM_BODENBEDECKUNG",
+    "TLM_GEBAEUDE_FOOTPRINT",
 )
 
-# objektart (TLM_STRASSE) -> OSM highway value. Best-effort against the documented
-# swissTLM3D road-class domain; reconcile with `ogrinfo -so <gpkg> <layer>` against
-# real data. Unknown road classes fall back to ROAD_HIGHWAY_DEFAULT.
-ROAD_HIGHWAY = {
-    "Autobahn": "motorway",
-    "Autostrasse": "trunk",
-    "Hauptstrasse": "primary",
-    "Verbindungsstrasse": "secondary",
-    "Verbindung": "secondary",
-    "Sammelstrasse": "tertiary",
-    "Nebenstrasse": "unclassified",
-    "Quartierstrasse": "residential",
-    "Zufahrt": "service",
-    "Dienstzufahrt": "service",
-    "Fahrweg": "track",
-    "Feldweg": "track",
-    "Wanderweg": "path",
-    "Verbindungsweg": "footway",
-    "Klettersteig": "path",
-    "Markierte Route": "path",
+# Per-layer OGR SQL filter applied at export time so we only stream the rows we
+# map (e.g. just the water polygons out of all land-cover).
+LAYER_WHERE = {
+    "TLM_BODENBEDECKUNG": "OBJEKTART IN (5, 10)",  # 5 Fliessgewaesser, 10 Stehende Gewaesser
+}
+
+# OBJEKTART code tables, authoritative per the swisstopo "Objektkatalog swissTLM3D"
+# (v2.4). OBJEKTART is an *integer* in the data, not a German label. ``None`` drops
+# the feature (virtual/non-map geometry); unknown codes fall back to a sensible
+# default. Reconciled against real data via `ogrinfo -sql "SELECT DISTINCT ..."`.
+
+# TLM_STRASSE.OBJEKTART -> OSM highway value.
+ROAD_OBJEKTART: dict[int, str | None] = {
+    0: "motorway_link",   # Ausfahrt (exit ramp)
+    1: "motorway_link",   # Einfahrt (entry ramp)
+    2: "motorway",        # Autobahn
+    3: "service",         # Raststaette (rest-area service road)
+    4: None,              # Verbindung (virtual connector axis)
+    5: "unclassified",    # Zufahrt (ramp<->road link)
+    6: "service",         # Dienstzufahrt (maintenance/service access)
+    8: "secondary",       # 10m Strasse (wide main road)
+    9: "tertiary",        # 6m Strasse
+    10: "unclassified",   # 4m Strasse
+    11: "residential",    # 3m Strasse (narrow side road)
+    12: "service",        # Platz (square / parking axis)
+    13: None,             # Autozug (car-carrying train route)
+    14: None,             # Faehre (ferry) -> special-cased to route=ferry
+    15: "track",          # 2m Weg (drivable track)
+    16: "path",           # 1m Weg
+    17: "path",           # 1m Wegfragment
+    18: "track",          # 2m Wegfragment
+    19: "path",           # Markierte Spur (marked route)
+    20: "primary",        # 8m Strasse
+    21: "trunk",          # Autostrasse (expressway)
+    22: "path",           # Klettersteig (via ferrata)
+    23: "path",           # Provisorium (provisional slow-traffic axis)
 }
 ROAD_HIGHWAY_DEFAULT = "road"
+
+# TLM_FLIESSGEWAESSER.OBJEKTART -> tags (None drops penstocks / virtual axes).
+WATERWAY_OBJEKTART: dict[int, dict[str, str] | None] = {
+    0: {"waterway": "canal"},                          # Bisse / Suone (irrigation)
+    1: None, 2: None, 3: None,                         # Druckleitung / -stollen (penstocks)
+    4: {"waterway": "stream"},                         # Fliessgewaesser (stream / river)
+    6: None,                                           # Seeachse (virtual lake axis)
+    7: {"waterway": "stream", "intermittent": "yes"},  # Trockenrinne (dry channel)
+}
+WATERWAY_DEFAULT = {"waterway": "stream"}
+
+# TLM_BODENBEDECKUNG.OBJEKTART -> tags. The water polygons (filtered via
+# LAYER_WHERE) become filled water areas; any other land cover is dropped.
+WATER_AREA_OBJEKTART: dict[int, dict[str, str] | None] = {
+    5: {"natural": "water"},    # Fliessgewaesser (river surface)
+    10: {"natural": "water"},   # Stehende Gewaesser (lake)
+}
+
+# TLM_STEHENDES_GEWAESSER.OBJEKTART (shoreline *lines*, not in the default set).
+# Kept for explicit --tlm-layer use; code 1 = lake outline, 0 = island outline.
+LAKE_OBJEKTART: dict[int, dict[str, str] | None] = {
+    0: None,                    # Seeinsel (island shoreline)
+    1: {"natural": "water"},    # See (Seeuferlinie)
+}
+
+# Aggregated "tag map" (the data driving :func:`tags_for`), exposed for tests/tools.
+TAG_MAP = {
+    "road": ROAD_OBJEKTART,
+    "waterway": WATERWAY_OBJEKTART,
+    "water_area": WATER_AREA_OBJEKTART,
+    "water_line": LAKE_OBJEKTART,
+    "building": {"*": {"building": "yes"}},
+}
 
 
 def _prop(props: dict, *names: str) -> str | None:
@@ -74,15 +125,28 @@ def _prop(props: dict, *names: str) -> str | None:
     return None
 
 
+def _int_prop(props: dict, *names: str) -> int | None:
+    """Case-insensitive lookup coerced to ``int`` (handles "4"/4.0), else None."""
+    raw = _prop(props, *names)
+    if raw is None:
+        return None
+    try:
+        return int(float(raw))
+    except ValueError:
+        return None
+
+
 def _layer_kind(layer: str) -> str | None:
     """Map an arbitrary swissTLM3D layer name to a logical feature kind."""
     name = layer.lower()
-    if "strasse" in name or "strassen" in name:
+    if "strasse" in name:
         return "road"
     if "fliessgewaesser" in name:
         return "waterway"
+    if "bodenbedeckung" in name:
+        return "water_area"      # filtered to water polygons via LAYER_WHERE
     if "stehende" in name or "see" in name:
-        return "water"
+        return "water_line"      # shoreline lines (non-default)
     if "gebaeude" in name:
         return "building"
     return None
@@ -91,37 +155,48 @@ def _layer_kind(layer: str) -> str | None:
 def tags_for(layer: str, props: dict) -> dict[str, str] | None:
     """OSM tags for a swissTLM3D feature, or ``None`` to drop it.
 
-    The mapping (:data:`TAG_MAP` semantics) is keyed by the logical kind derived
-    from ``layer``; the source ``NAME`` attribute is carried through when present.
+    Keyed by the logical kind derived from ``layer`` and the integer ``OBJEKTART``
+    code; the source name (``STRASSENNAME``/``NAME``) is carried through.
     """
     kind = _layer_kind(layer)
     if kind is None:
         return None
+    code = _int_prop(props, "objektart")
 
-    tags: dict[str, str] = {}
     if kind == "road":
-        objektart = _prop(props, "objektart")
-        tags["highway"] = ROAD_HIGHWAY.get(objektart, ROAD_HIGHWAY_DEFAULT)
+        if code == 14:  # Faehre
+            tags: dict[str, str] = {"route": "ferry"}
+        else:
+            highway = ROAD_OBJEKTART.get(code, ROAD_HIGHWAY_DEFAULT)
+            if highway is None:
+                return None
+            tags = {"highway": highway}
+        name = _prop(props, "strassenname", "name")
     elif kind == "waterway":
-        tags["waterway"] = "stream"
-    elif kind == "water":
-        tags["natural"] = "water"
-    elif kind == "building":
-        tags["building"] = "yes"
+        base = WATERWAY_OBJEKTART.get(code, WATERWAY_DEFAULT)
+        if base is None:
+            return None
+        tags = dict(base)
+        name = _prop(props, "name")
+    elif kind == "water_area":
+        base = WATER_AREA_OBJEKTART.get(code)
+        if base is None:
+            return None
+        tags = dict(base)
+        name = _prop(props, "name")
+    elif kind == "water_line":
+        base = LAKE_OBJEKTART.get(code, {"natural": "water"})
+        if base is None:
+            return None
+        tags = dict(base)
+        name = _prop(props, "name")
+    else:  # building
+        tags = {"building": "yes"}
+        name = _prop(props, "name")
 
-    name = _prop(props, "name", "uuid_name")
     if name:
         tags["name"] = name
     return tags
-
-
-# Public alias so callers/tests can introspect the supported kinds as data.
-TAG_MAP = {
-    "road": {"highway": ROAD_HIGHWAY_DEFAULT},
-    "waterway": {"waterway": "stream"},
-    "water": {"natural": "water"},
-    "building": {"building": "yes"},
-}
 
 
 class _IdAllocator:
@@ -202,17 +277,23 @@ def geojson_to_osm(lines: Iterable[str], layer: str, ids: _IdAllocator) -> Itera
         yield from feature_to_osm(layer, feature, ids)
 
 
-def ogr_geojson_cmd(src: Path, layer: str, dst: Path, *, source_epsg: int) -> list[str]:
-    """argv for ``ogr2ogr`` reprojecting one ``layer`` to WGS84 GeoJSONSeq."""
-    return [
+def ogr_geojson_cmd(
+    src: Path, layer: str, dst: Path, *, source_epsg: int, where: str | None = None
+) -> list[str]:
+    """argv for ``ogr2ogr`` reprojecting one ``layer`` to WGS84 GeoJSONSeq.
+
+    ``where`` is an optional OGR SQL attribute filter applied at export time.
+    """
+    cmd = [
         "ogr2ogr",
         "-f", "GeoJSONSeq",
         "-s_srs", f"EPSG:{source_epsg}",
         "-t_srs", "EPSG:4326",
-        str(dst),
-        str(src),
-        layer,
     ]
+    if where:
+        cmd += ["-where", where]
+    cmd += [str(dst), str(src), layer]
+    return cmd
 
 
 def build_features_osm(
@@ -240,7 +321,10 @@ def build_features_osm(
         for layer in layers:
             geojson = scratch / f"{layer}.geojsonl"
             try:
-                gdal_tools._run(ogr_geojson_cmd(src, layer, geojson, source_epsg=source_epsg))
+                gdal_tools._run(ogr_geojson_cmd(
+                    src, layer, geojson, source_epsg=source_epsg,
+                    where=LAYER_WHERE.get(layer),
+                ))
             except TopovertError as exc:
                 log.warning("skipping swissTLM3D layer %r: %s", layer, exc)
                 continue
@@ -249,6 +333,6 @@ def build_features_osm(
                 for fragment in geojson_to_osm(gj, layer, ids):
                     fh.write(fragment)
                     count += 1
-                log.info("layer %s -> %d OSM element group(s)", layer, count)
+                log.info("layer %s -> %d OSM element(s)", layer, count)
         fh.write(osm.OSM_FOOTER)
     return dst

@@ -34,7 +34,11 @@ uv sync
 
 # Point at a folder of swissALTI3D *.tif tiles; get a hill-shaded .IMG
 uv run topovert build --dem-dir ./swissalti3d_tiles --out ./out/swiss.img
+
+# Optionally overlay swissTLM3D vector features (roads, watercourses, water, buildings)
+uv run topovert build --dem-dir ./swissalti3d_tiles \
+    --tlm ./SWISSTLM3D_CHLV95LN02.gdb --out ./out/swiss.img
 ```
 
 Then copy the `.IMG` to your Garmin device (or load it in BaseCamp) to see the shaded relief.
-Run `topovert build --help` for options (resolution, resampling, source EPSG).
+Run `topovert build --help` for options (resolution, resampling, source EPSG, `--tlm`/`--tlm-layer`).

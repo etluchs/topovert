@@ -63,6 +63,13 @@ and a Java **≥ 1.8** runtime. mkgmap.jar is auto-downloaded + SHA-pinned into 
   its docstring for the arithmetic. Verify output tiles with `gdalinfo` (expect 3601×3601, Int16, EPSG:4326).
 - **mkgmap.org.uk prunes old revisions**, so a pinned URL 404s eventually. Bumping the version means
   updating **both** `jars.MKGMAP_URL` and `jars.MKGMAP_SHA256` (download + `sha256sum`).
+- **swissTLM3D `OBJEKTART` is an integer code, not a German string** (`vector.py` maps the documented
+  codes per layer; verify with `ogrinfo -sql "SELECT DISTINCT OBJEKTART FROM <layer>"`). The GDB does
+  **not** carry a coded-value domain for `OBJEKTART`, so the integer→label table comes from the
+  swisstopo *Objektkatalog swissTLM3D* PDF.
+- **Filled water areas come from `TLM_BODENBEDECKUNG` polygons** (`OBJEKTART IN (5,10)` = river surface
+  + lake), *not* `TLM_STEHENDES_GEWAESSER`, whose features are unclosed shoreline **lines** that can't
+  fill as area. `vector.LAYER_WHERE` filters land cover to water at export time.
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:7510c1e2 -->
 ## Beads Issue Tracker
