@@ -11,15 +11,23 @@ The initial use case is creating maps for Garmin navigation devices (see [Openst
 Key features are:
 
  - Easy selection of base maps (area, geodata, scale, ...) based on what Swisstopo offers (use their selection tooling if possible)
- - Should run on any OS (Linux, OSX, Windows). One idea would be Browser with, if necessary, WASM. But research is necessary here.
- - producds .IMG files ready to install on Garmin navigation gear.
+ - Runs on any OS (Linux, OSX, Windows) as a local command-line tool. (A browser/WASM front-end was
+   explored but is incompatible with the GDAL + JVM toolchain v1 relies on.)
+ - Produces .IMG files ready to install on Garmin navigation gear.
 
 ## Status
 
-v1 converts a local directory of **swissALTI3D** GeoTIFF elevation tiles (EPSG:2056) into a
-**hill-shaded Garmin `.IMG`**. It is a thin Python orchestrator around the **GDAL** command-line
-tools and **mkgmap**. Vector map features (swissTLM3D), contour lines, and automatic area download
-are planned next.
+v1 turns freely available Swisstopo data into a Garmin `.IMG`. It is a thin Python orchestrator
+(stdlib only) around the **GDAL** command-line tools, **mkgmap**, and **splitter**:
+
+- A local directory of **swissALTI3D** GeoTIFF elevation tiles (EPSG:2056 / LV95) becomes a
+  **hill-shaded** map (`--dem-dir`).
+- **swissTLM3D** vector features overlay the map (`--tlm`): roads/paths, railways, aerialways,
+  watercourses, land cover (water/forest/rock/glacier/wetland), buildings, POIs, and walls.
+- Either input is optional: `--tlm` alone makes a **vector-only** map, `--dem-dir` alone a
+  hillshade-only map. Large extents (up to whole-country) are tiled with **splitter** automatically.
+
+Contour lines and automatic area download are planned next.
 
 ## Requirements
 

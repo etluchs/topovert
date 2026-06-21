@@ -4,7 +4,7 @@ Design constraint (see ``CLAUDE.md``): topovert shells out to the GDAL **CLI**, 
 the ``osgeo`` Python bindings. ``ogr2ogr`` cannot *write* OSM (its OSM driver is
 read-only) but it can write **GeoJSON**, so the pipeline is:
 
-    swissTLM3D .gpkg  --ogr2ogr (reproject 2056->4326, -f GeoJSONSeq)-->  *.geojsonl
+    swissTLM3D .gdb   --ogr2ogr (reproject 2056->4326, -f GeoJSONSeq)-->  *.geojsonl
                       --geojson_to_osm (this module, stdlib only)------>  features.osm
                       --mkgmap --dem ----------------------------------->  .IMG
 
