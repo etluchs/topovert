@@ -26,6 +26,8 @@ v1 turns freely available Swisstopo data into a Garmin `.IMG`. It is a thin Pyth
   watercourses, land cover (water/forest/rock/glacier/wetland), buildings, POIs, and walls.
 - Either input is optional: `--tlm` alone makes a **vector-only** map, `--dem-dir` alone a
   hillshade-only map. Large extents (up to whole-country) are tiled with **splitter** automatically.
+- A bundled **Swiss topographic style + TYP** colours the output (forest, rock, glacier and water
+  fills; red paths; Swiss-tuned road/rail rendering) so the map is legible on-device out of the box.
 
 Contour lines and automatic area download are planned next.
 

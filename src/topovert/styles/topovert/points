@@ -1,0 +1,22 @@
+# mkgmap point rules for the topovert Swiss style.
+#
+# POIs come from TLM_EINZELOBJEKT (+ amenity=fountain). They are mapped to
+# standard Garmin POI type numbers so devices render them with their built-in
+# icons and the feature name as a label; custom point icons are deferred (see
+# the bd follow-up). Resolution gates the zoom at which each marker appears.
+
+# Summits / survey marks
+man_made=cross         [0x6616 resolution 20]
+man_made=survey_point  [0x6616 resolution 22]
+
+# Water features
+natural=spring         [0x6512 resolution 22]
+amenity=fountain       [0x6512 resolution 22]
+man_made=water_works   [0x6512 resolution 22]
+waterway=waterfall     [0x6512 resolution 22]
+
+# Natural / historic
+natural=cave_entrance  [0x6402 resolution 22]
+historic=monument       [0x2c0b resolution 22]
+historic=wayside_shrine [0x2c0b resolution 22]
+historic=boundary_stone [0x6603 resolution 22]

@@ -1,0 +1,164 @@
+; topovert TYP source — Swiss topographic colours for the types assigned in the
+; mkgmap style (src/topovert/styles/topovert/{lines,polygons}). mkgmap compiles
+; this text TYP when it is passed on the command line; FID/ProductCode MUST match
+; mkgmap's --family-id / --product-id (see src/topovert/mkgmap.py) or the device
+; ignores it. Solid fills/lines use the "0 0 1 0" Xpm form (one colour, no
+; bitmap). Labels are ASCII (no umlauts) to stay safe under CodePage 1252.
+
+[_id]
+FID=6324
+ProductCode=1
+CodePage=1252
+[end]
+
+; Draw order: higher level paints later (on top). Water and rock/scree go down
+; first, vegetation over them, buildings last so they are never buried.
+[_drawOrder]
+Type=0x3c,1
+Type=0x4d,1
+Type=0x52,1
+Type=0x53,1
+Type=0x50,2
+Type=0x4e,2
+Type=0x51,2
+Type=0x13,3
+[end]
+
+; --- Land cover (polygons) --------------------------------------------------
+[_polygon]
+Type=0x3c
+String1=0x04,Wasser
+Xpm="0 0 1 0"
+"1 c #5AA0D8"
+[end]
+
+[_polygon]
+Type=0x4d
+String1=0x04,Gletscher
+Xpm="0 0 1 0"
+"1 c #E4F1FB"
+[end]
+
+[_polygon]
+Type=0x52
+String1=0x04,Fels
+Xpm="0 0 1 0"
+"1 c #D8D2C6"
+[end]
+
+[_polygon]
+Type=0x53
+String1=0x04,Geroell
+Xpm="0 0 1 0"
+"1 c #E6E1D6"
+[end]
+
+[_polygon]
+Type=0x50
+String1=0x04,Wald
+Xpm="0 0 1 0"
+"1 c #BFE0A8"
+[end]
+
+[_polygon]
+Type=0x4e
+String1=0x04,Gebuesch
+Xpm="0 0 1 0"
+"1 c #D2E8B4"
+[end]
+
+[_polygon]
+Type=0x51
+String1=0x04,Feuchtgebiet
+Xpm="0 0 1 0"
+"1 c #B8DCD0"
+[end]
+
+[_polygon]
+Type=0x13
+String1=0x04,Gebaeude
+Xpm="0 0 1 0"
+"1 c #C8A8A0"
+[end]
+
+; --- Lines ------------------------------------------------------------------
+[_line]
+Type=0x16
+String1=0x04,Wanderweg
+Xpm="0 0 1 0"
+"1 c #E03028"
+LineWidth=2
+BorderWidth=0
+[end]
+
+[_line]
+Type=0x0a
+String1=0x04,Feldweg
+Xpm="0 0 1 0"
+"1 c #A06828"
+LineWidth=2
+BorderWidth=0
+[end]
+
+[_line]
+Type=0x14
+String1=0x04,Eisenbahn
+Xpm="0 0 1 0"
+"1 c #303030"
+LineWidth=2
+BorderWidth=0
+[end]
+
+[_line]
+Type=0x15
+String1=0x04,Luftseilbahn
+Xpm="0 0 1 0"
+"1 c #707070"
+LineWidth=1
+BorderWidth=0
+[end]
+
+[_line]
+Type=0x1f
+String1=0x04,Fluss
+Xpm="0 0 1 0"
+"1 c #5AA0D8"
+LineWidth=3
+BorderWidth=0
+[end]
+
+[_line]
+Type=0x1e
+String1=0x04,Kanal
+Xpm="0 0 1 0"
+"1 c #5AA0D8"
+LineWidth=2
+BorderWidth=0
+[end]
+
+[_line]
+Type=0x18
+String1=0x04,Bach
+Xpm="0 0 1 0"
+"1 c #5AA0D8"
+LineWidth=1
+BorderWidth=0
+[end]
+
+[_line]
+Type=0x1b
+String1=0x04,Faehre
+Xpm="0 0 1 0"
+"1 c #5AA0D8"
+LineWidth=1
+BorderWidth=0
+[end]
+
+[_line]
+Type=0x1d
+String1=0x04,Mauer
+Xpm="0 0 1 0"
+"1 c #806040"
+LineWidth=1
+BorderWidth=0
+[end]
