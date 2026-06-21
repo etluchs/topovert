@@ -1,0 +1,7 @@
+# mkgmap style options for the "topovert" Swiss topographic style.
+# levels maps Garmin zoom levels -> resolution (24 = most detail). The rule files
+# place each feature at one of these resolutions, so the levels listed here are
+# the only resolutions the rules may use.
+name=topovert
+summary=Swiss topographic style (swissTLM3D + swissALTI3D)
+levels = 0:24, 1:22, 2:20, 3:18, 4:16

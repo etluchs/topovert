@@ -36,7 +36,9 @@ per-1°-tile `gdalwarp` (2056→4326, SRTM1/3 grid) + `gdal_translate -of SRTMHG
 loadable `gmapsupp.img`. Modules: `hgt.py` (SRTM tiling geometry — unit-tested), `gdal_tools.py`
 (GDAL argv builders + exec), `osm.py` (OSM XML writer + node/way serializers), `vector.py`
 (swissTLM3D → GeoJSON → OSM, data-only `TAG_MAP`, bounds), `jars.py` (Java + mkgmap/splitter
-download-cache), `splitter.py`, `mkgmap.py` (the `.IMG` build), `cli.py`.
+download-cache), `splitter.py`, `mkgmap.py` (the `.IMG` build), `cli.py`. The bundled mkgmap
+**style + TYP** live under `src/topovert/styles/` (`topovert/` rule files + `topovert_typ.txt`);
+`mkgmap.py` always applies them via `--style-file` + the TYP input.
 
 The README's "browser + WASM" idea is **incompatible** with this GDAL+JVM pipeline; v1 is a local CLI.
 
@@ -89,6 +91,14 @@ sources with `TOPOVERT_MKGMAP_URL` / `TOPOVERT_SPLITTER_URL`.
 - **Filled water areas come from `TLM_BODENBEDECKUNG` polygons** (`OBJEKTART IN (5,10)` = river surface
   + lake), *not* `TLM_STEHENDES_GEWAESSER`, whose features are unclosed shoreline **lines** that can't
   fill as area. `vector.LAYER_WHERE` filters land cover to water at export time.
+- **The Swiss rendering is a mkgmap style + a text TYP** (`src/topovert/styles/`). The style's
+  `lines`/`points`/`polygons` map the OSM tags `vector.py` emits to Garmin type codes + resolutions;
+  `topovert_typ.txt` recolours the topo-relevant types (land cover, paths, watercourses). mkgmap
+  compiles the **text** TYP only if it's passed as an input file with a `.txt` extension, *and* its
+  `FID`/`ProductCode` match `--family-id`/`--product-id` (6324/1) or the device silently ignores it
+  (`test_style.py` guards this). Type codes left out of the TYP fall back to Garmin's default look.
+  Editing rules is data-only; `test_style.py` asserts every emitted tag still has a matching rule.
+  No automated substitute for the visual check — load the result in QMapShack/on a device.
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:7510c1e2 -->
 ## Beads Issue Tracker

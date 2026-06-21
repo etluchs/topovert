@@ -46,7 +46,19 @@ def test_build_img_cmd_single_tile_with_dem():
     assert "--gmapsupp" in cmd
     assert f"--family-id={mkgmap.FAMILY_ID}" in cmd
     assert f"--mapname={mkgmap.MAP_NUMBER}" in cmd  # single tile is named
-    assert cmd[-1] == "bounds.osm"
+    # Swiss style applied, and the TYP follows the osm input (last arg).
+    assert f"--style-file={mkgmap.STYLE_DIR}" in cmd
+    assert cmd[-1] == str(mkgmap.TYP_FILE)
+    assert cmd[-2] == "bounds.osm"
+
+
+def test_build_img_cmd_style_can_be_disabled():
+    cmd = mkgmap.build_img_cmd(
+        "java", Path("mkgmap.jar"), [Path("features.osm")], Path("out"),
+        map_name="swiss", style_dir=None, typ_file=None,
+    )
+    assert not any(a.startswith("--style-file=") for a in cmd)
+    assert cmd[-1] == "features.osm"  # no TYP appended
 
 
 def test_build_img_cmd_vector_only_has_no_dem():
@@ -65,7 +77,8 @@ def test_build_img_cmd_split_tiles_drop_mapname():
         map_name="swiss", mapname=None,  # tiles carry their own numbers
     )
     assert not any(a.startswith("--mapname=") for a in cmd)
-    assert cmd[-2:] == ["63240001.osm.pbf", "63240002.osm.pbf"]
+    # tiles precede the TYP, which mkgmap binds last
+    assert cmd[-3:] == ["63240001.osm.pbf", "63240002.osm.pbf", str(mkgmap.TYP_FILE)]
 
 
 def test_split_cmd_outputs_pbf_tiles():

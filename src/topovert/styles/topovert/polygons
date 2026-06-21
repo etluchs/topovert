@@ -1,0 +1,15 @@
+# mkgmap polygon rules for the topovert Swiss style.
+#
+# Land-cover areas come from TLM_BODENBEDECKUNG; buildings from
+# TLM_GEBAEUDE_FOOTPRINT. Colours are defined in topovert_typ.txt, and the TYP
+# draw order makes buildings paint on top of the land-cover fills (Garmin's
+# default order is by ascending type number, which would bury them).
+
+natural=water     [0x3c resolution 18]
+natural=glacier   [0x4d resolution 18]
+natural=bare_rock [0x52 resolution 18]
+natural=scree     [0x53 resolution 20]
+natural=wood      [0x50 resolution 18]
+natural=scrub     [0x4e resolution 20]
+natural=wetland   [0x51 resolution 20]
+building=*        [0x13 resolution 24]

@@ -22,6 +22,15 @@ FAMILY_ID = 6324
 PRODUCT_ID = 1
 MAP_NUMBER = "63240001"
 
+# Bundled Swiss topographic rendering (issue topovert-z0q): a mkgmap *style*
+# (the swissTLM3D tag -> Garmin type rules) plus a TYP source giving land cover
+# and paths Swiss colours. ``--style-file`` points at the style dir; the TYP txt
+# is passed as an input file and mkgmap compiles it (its FID/ProductCode match
+# FAMILY_ID/PRODUCT_ID above). Both ship inside the package.
+_STYLES_DIR = Path(__file__).resolve().parent / "styles"
+STYLE_DIR = _STYLES_DIR / "topovert"
+TYP_FILE = _STYLES_DIR / "topovert_typ.txt"
+
 
 def build_img_cmd(
     java: str,
@@ -32,6 +41,8 @@ def build_img_cmd(
     map_name: str,
     hgt_dir: Path | None = None,
     mapname: str | None = MAP_NUMBER,
+    style_dir: Path | None = STYLE_DIR,
+    typ_file: Path | None = TYP_FILE,
 ) -> list[str]:
     """Argv for the mkgmap run.
 
@@ -39,6 +50,8 @@ def build_img_cmd(
     ``--dem`` for hillshading (omit for a vector-only map). ``osm_inputs`` is one
     ``.osm`` (single tile) or many ``.osm.pbf`` (splitter tiles); for the latter
     pass ``mapname=None`` so mkgmap takes each tile's number from its filename.
+    ``style_dir`` / ``typ_file`` apply the bundled Swiss rendering; pass ``None``
+    to fall back to mkgmap's default style/appearance.
     """
     cmd = [
         java, "-jar", str(jar),
@@ -49,11 +62,16 @@ def build_img_cmd(
         "--country-name=Switzerland",
         "--gmapsupp",
     ]
+    if style_dir is not None:
+        cmd.append("--style-file=" + str(style_dir))
     if mapname is not None:
         cmd.append("--mapname=" + mapname)
     if hgt_dir is not None:
         cmd.append("--dem=" + str(hgt_dir))
     cmd += [str(p) for p in osm_inputs]
+    # The TYP must follow the .osm/.pbf inputs so mkgmap binds it to this map.
+    if typ_file is not None:
+        cmd.append(str(typ_file))
     return cmd
 
 
@@ -66,12 +84,15 @@ def build_img(
     map_name: str = "topovert",
     hgt_dir: Path | None = None,
     mapname: str | None = MAP_NUMBER,
+    style_dir: Path | None = STYLE_DIR,
+    typ_file: Path | None = TYP_FILE,
 ) -> Path:
     """Run mkgmap and return the path to the produced ``gmapsupp.img``."""
     out_dir.mkdir(parents=True, exist_ok=True)
     cmd = build_img_cmd(
         java, jar, osm_inputs, out_dir,
         map_name=map_name, hgt_dir=hgt_dir, mapname=mapname,
+        style_dir=style_dir, typ_file=typ_file,
     )
     log.debug("run: %s", " ".join(cmd))
     proc = subprocess.run(cmd, capture_output=True, text=True)
