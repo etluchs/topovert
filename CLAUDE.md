@@ -2,27 +2,61 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project status
+## What the project does
 
-Topovert is a **greenfield project** — at the time of writing the repository contains only `README.md` and IDE config under `.idea/`. There is no source code, build system, dependency manifest, or tests yet, and no commits on the `master` branch. Expect to be establishing structure rather than fitting into it.
+Topovert converts freely available [Swisstopo](https://www.swisstopo.admin.ch/de/digitale-karten)
+data into `.IMG` files installable on Garmin navigation devices.
 
-When you add the first real code, update this file with the actual build/test/run commands and architecture.
+**v1 (current) is one vertical slice:** a local directory of swissALTI3D GeoTIFF elevation tiles
+(EPSG:2056 / LV95) → a hill-shaded Garmin `.IMG`. Vector features (swissTLM3D), contour lines,
+and area auto-download are deferred — tracked as beads issues (`bd list`).
 
-## What the project is meant to do
+## Stack & architecture
 
-Topovert converts topographical maps into target formats via easily configurable conversions. The initial concrete goal:
+**Decided by a stability-and-simplicity-first rule:** a thin **Python** orchestrator (stdlib only,
+zero runtime pip deps) that shells out to two mature external toolchains and writes almost no
+geospatial/encoding code itself:
 
-- Take freely available [Swisstopo](https://www.swisstopo.admin.ch/de/digitale-karten) topographical data.
-- Produce `.IMG` files installable on Garmin navigation devices (see the [OSM Map On Garmin / IMG File Format wiki](https://wiki.openstreetmap.org/wiki/OSM_Map_On_Garmin/IMG_File_Format)).
+- **GDAL command-line tools** (`gdalbuildvrt`, `gdalwarp`, `gdal_translate`, `gdalinfo`) — reprojection
+  and raster conversion. We use the **CLI, not the `osgeo.gdal` bindings** (far easier cross-platform
+  install, version-tolerant).
+- **mkgmap** (Java) — does all Garmin `.IMG` encoding, including embedding the DEM for hillshading.
 
-Design intentions from the README that should shape early decisions:
+Pipeline (`src/topovert/pipeline.py:build`): GeoTIFFs → `gdalbuildvrt` mosaic → WGS84 bounds →
+per-1°-tile `gdalwarp` (reproject 2056→4326, resample to SRTM1/3, exact grid) + `gdal_translate -of
+SRTMHGT` → minimal bounds `.osm` → `mkgmap --dem`. Modules: `hgt.py` (pure SRTM tiling geometry —
+fully unit-tested), `gdal_tools.py` (GDAL argv builders + exec), `osm.py` (minimal OSM), `jars.py`
+(Java discovery + mkgmap auto-download/cache), `mkgmap.py` (the `.IMG` build), `cli.py`.
 
-- **Base-map selection** should let the user pick area / geodata / scale / etc. based on what Swisstopo offers — prefer reusing Swisstopo's own selection tooling over reimplementing it.
-- **Cross-platform** (Linux, macOS, Windows). A browser-based approach (with WASM where needed) is one idea under consideration, not a settled decision. Research is expected before committing.
+The README's "browser + WASM" idea is **incompatible** with this GDAL+JVM pipeline; v1 is a local CLI.
 
-## Language / toolchain not yet decided
+## Commands
 
-The `.idea/` config is contradictory: `misc.xml` and `topovert.iml` describe a JDK 21 Java module, while `go.imports.xml` and an AWS Toolkit config are also present, and Go is installed in the environment. **The implementation language has not been settled.** Do not assume Java or Go — confirm the intended stack before scaffolding, and avoid leaning on the stale `.idea/` module type as evidence either way.
+```bash
+python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"   # one-time setup
+.venv/bin/pytest                          # run all unit tests
+.venv/bin/pytest tests/test_hgt.py -q     # one test file
+.venv/bin/topovert build --dem-dir ./tiles --out ./out/swiss.img   # run the pipeline
+.venv/bin/topovert -v build ... --keep-intermediate                # debug: verbose + keep workdir
+```
+
+**System prerequisites** (checked at runtime, not pip-installed): GDAL CLI **with the SRTMHGT driver**,
+and a Java **≥ 1.8** runtime. mkgmap.jar is auto-downloaded + SHA-pinned into the per-user cache
+(`~/.cache/topovert/`) on first run; override the source with `TOPOVERT_MKGMAP_URL`.
+
+## Gotchas (hard-won; see `bd memories`)
+
+- **mkgmap needs its `lib/` jars**: `mkgmap.jar`'s manifest `Class-Path` points at sibling `lib/*.jar`
+  (osmpbf/protobuf/fastutil). Extract the **whole** distribution, not just the jar, or you get
+  `NoClassDefFoundError: crosby/binary/file/BlockReaderAdapter`.
+- **mkgmap reads a DEM border beyond the map bounds**, so data near a 1° tile edge makes it touch the
+  neighbour tile (warns "file not found … height 0"). `pipeline.DEM_TILE_MARGIN_DEG` pads the bounds so
+  neighbour tiles get generated (void where there's no source data).
+- **HGT is point-registered**: a valid SRTM1 tile is 3601×3601 with sample centres exactly on the
+  integer-degree grid. `Tile.warp_extent` pads the warp target by half a pixel to achieve this — see
+  its docstring for the arithmetic. Verify output tiles with `gdalinfo` (expect 3601×3601, Int16, EPSG:4326).
+- **mkgmap.org.uk prunes old revisions**, so a pinned URL 404s eventually. Bumping the version means
+  updating **both** `jars.MKGMAP_URL` and `jars.MKGMAP_SHA256` (download + `sha256sum`).
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:7510c1e2 -->
 ## Beads Issue Tracker

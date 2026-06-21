@@ -4,3 +4,28 @@
 .dolt/
 *.db
 .beads-credential-key
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+
+# Test / tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# topovert outputs / scratch
+*.img
+*.hgt
+out/
+sample/
+
+# Local sample/test datasets (large swissALTI3D downloads — not for VCS)
+testdata/
+*.zip
