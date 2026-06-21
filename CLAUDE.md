@@ -64,10 +64,14 @@ and a Java **≥ 1.8** runtime. mkgmap.jar is auto-downloaded + SHA-pinned into 
   its docstring for the arithmetic. Verify output tiles with `gdalinfo` (expect 3601×3601, Int16, EPSG:4326).
 - **mkgmap.org.uk prunes old revisions**, so a pinned URL 404s eventually. Bumping the version means
   updating **both** `jars.MKGMAP_URL` and `jars.MKGMAP_SHA256` (download + `sha256sum`).
-- **mkgmap must run with `--gmapsupp`**: a bare detail tile (`63240001.img`) renders **empty** on a
-  Garmin device and makes QMapShack warn "Mapping a file beyond its size is not portable". `--gmapsupp`
-  (+ `--family-id`/`--product-id`/`--mapname`) bundles detail + overview into the single loadable
-  `gmapsupp.img` we copy to `--out`. On a Fenix, drop it in the device's `Garmin/` folder.
+- **Ship a `gmapsupp.img`, not a bare tile**: mkgmap emits a detail tile (`63240001.img`) plus a
+  separate overview + `.tdb`. The single self-contained product a device loads is `gmapsupp.img`
+  (via `--gmapsupp` + `--family-id`/`--product-id`/`--mapname`), which the pipeline copies to `--out`;
+  on a Fenix, drop it in the device's `Garmin/` folder.
+- **QMapShack's "Mapping a file beyond its size is not portable" warning is benign** — mkgmap declares
+  the IMG partition one 512-byte block larger than the actual file. It is NOT a corruption signal and
+  does not affect rendering; ignore it. (If a map looks "empty", check you're viewing the map's
+  coordinates — a small extent is easy to miss.)
 - **swissTLM3D `OBJEKTART` is an integer code, not a German string** (`vector.py` maps the documented
   codes per layer; verify with `ogrinfo -sql "SELECT DISTINCT OBJEKTART FROM <layer>"`). The GDB does
   **not** carry a coded-value domain for `OBJEKTART`, so the integer→label table comes from the
