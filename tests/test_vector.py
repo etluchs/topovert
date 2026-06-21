@@ -47,13 +47,33 @@ def test_tags_for_waterway_lines():
     assert vector.tags_for("TLM_FLIESSGEWAESSER", {"OBJEKTART": 6}) is None
 
 
-def test_tags_for_water_areas_from_bodenbedeckung():
-    # lake (10) and river surface (5) -> filled water; other land cover dropped
+def test_tags_for_landcover_from_bodenbedeckung():
+    # lake (10) / river surface (5) -> water; forest (12) -> wood; glacier (9)
     assert vector.tags_for("TLM_BODENBEDECKUNG", {"OBJEKTART": 10, "NAME": "Lac"}) == {
         "natural": "water", "name": "Lac",
     }
     assert vector.tags_for("TLM_BODENBEDECKUNG", {"OBJEKTART": 5}) == {"natural": "water"}
-    assert vector.tags_for("TLM_BODENBEDECKUNG", {"OBJEKTART": 12}) is None  # Wald
+    assert vector.tags_for("TLM_BODENBEDECKUNG", {"OBJEKTART": 12}) == {"natural": "wood"}
+    assert vector.tags_for("TLM_BODENBEDECKUNG", {"OBJEKTART": 9}) == {"natural": "glacier"}
+    assert vector.tags_for("TLM_BODENBEDECKUNG", {"OBJEKTART": 99}) is None  # unmapped land cover
+
+
+def test_tags_for_railway_and_aerialway():
+    assert vector.tags_for("TLM_EISENBAHN", {"OBJEKTART": 0}) == {"railway": "rail"}
+    assert vector.tags_for("TLM_EISENBAHN", {"OBJEKTART": 2}) == {"railway": "narrow_gauge"}
+    assert vector.tags_for("TLM_EISENBAHN", {"OBJEKTART": 999}) == {"railway": "rail"}  # default
+    assert vector.tags_for("TLM_UEBRIGE_BAHN", {"OBJEKTART": 0}) == {"aerialway": "cable_car"}
+    assert vector.tags_for("TLM_UEBRIGE_BAHN", {"OBJEKTART": 5}) == {"aerialway": "drag_lift"}
+    assert vector.tags_for("TLM_UEBRIGE_BAHN", {"OBJEKTART": 7}) is None  # Lift dropped
+
+
+def test_tags_for_poi_and_barrier():
+    assert vector.tags_for("TLM_EINZELOBJEKT", {"OBJEKTART": 7}) == {"natural": "spring"}
+    assert vector.tags_for("TLM_EINZELOBJEKT", {"OBJEKTART": 9, "NAME": "Fall"}) == {
+        "waterway": "waterfall", "name": "Fall",
+    }
+    assert vector.tags_for("TLM_EINZELOBJEKT", {"OBJEKTART": 99}) is None  # unmapped POI
+    assert vector.tags_for("TLM_MAUER", {"OBJEKTART": 0}) == {"barrier": "wall"}
 
 
 def test_ogr_geojson_cmd_applies_where_filter():
@@ -70,7 +90,8 @@ def test_tags_for_building_is_constant():
 
 
 def test_tags_for_unmapped_layer_is_dropped():
-    assert vector.tags_for("TLM_BODENBEDECKUNG", {"OBJEKTART": 11}) is None
+    assert vector.tags_for("TLM_NUTZUNGSAREAL", {"OBJEKTART": 0}) is None
+    assert vector.tags_for("TLM_STROMTRASSE", {"OBJEKTART": 1}) is None
 
 
 def test_feature_to_osm_linestring_emits_nodes_and_way():

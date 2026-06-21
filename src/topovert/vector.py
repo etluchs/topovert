@@ -30,59 +30,118 @@ log = logging.getLogger(__name__)
 # swissTLM3D ships as EPSG:2056 (LV95), same as the DEM.
 DEFAULT_SOURCE_EPSG = 2056
 
-# Default core-nav layers (exact swissTLM3D GDB names, uppercase). Water *areas*
-# come from TLM_BODENBEDECKUNG polygons (lakes + wide rivers), filtered to water
-# OBJEKTART at the source (see LAYER_WHERE) — the TLM_STEHENDES_GEWAESSER layer is
-# unclosed shoreline *lines* and can't fill as area without polygonisation
-# (follow-up). Classification (:func:`_layer_kind`) is case-insensitive.
+# Default layers (exact swissTLM3D GDB names, uppercase). Adding a feature class
+# is data-only: classify it in :func:`_layer_kind` and give its OBJEKTART table
+# below. Classification is case-insensitive so other deliveries/casing resolve.
+# Water *areas* come from TLM_BODENBEDECKUNG polygons (lakes + wide rivers); the
+# TLM_STEHENDES_GEWAESSER layer is unclosed shoreline *lines* that can't fill as
+# area without polygonisation (follow-up topovert-ktq).
 DEFAULT_TLM_LAYERS = (
-    "TLM_STRASSE",
-    "TLM_FLIESSGEWAESSER",
-    "TLM_BODENBEDECKUNG",
-    "TLM_GEBAEUDE_FOOTPRINT",
+    "TLM_STRASSE",            # roads / paths
+    "TLM_EISENBAHN",          # railways
+    "TLM_UEBRIGE_BAHN",       # aerialways (cable car / gondola / chair / drag lift)
+    "TLM_FLIESSGEWAESSER",    # watercourse lines
+    "TLM_BODENBEDECKUNG",     # land cover (water, forest, rock, glacier, ...)
+    "TLM_GEBAEUDE_FOOTPRINT", # buildings
+    "TLM_EINZELOBJEKT",       # POIs (spring, cave entrance, monument, ...)
+    "TLM_MAUER",              # walls
 )
 
-# Per-layer OGR SQL filter applied at export time so we only stream the rows we
-# map (e.g. just the water polygons out of all land-cover).
-LAYER_WHERE = {
-    "TLM_BODENBEDECKUNG": "OBJEKTART IN (5, 10)",  # 5 Fliessgewaesser, 10 Stehende Gewaesser
-}
-
 # OBJEKTART code tables, authoritative per the swisstopo "Objektkatalog swissTLM3D"
-# (v2.4). OBJEKTART is an *integer* in the data, not a German label. ``None`` drops
-# the feature (virtual/non-map geometry); unknown codes fall back to a sensible
-# default. Reconciled against real data via `ogrinfo -sql "SELECT DISTINCT ..."`.
+# (v2.4). OBJEKTART is an *integer* in the data, not a German label. A value of
+# ``None`` (explicit, or via the per-kind default) drops the feature. Verify codes
+# with `ogrinfo -sql "SELECT DISTINCT OBJEKTART FROM <layer>" <src>`.
 
-# TLM_STRASSE.OBJEKTART -> OSM highway value.
-ROAD_OBJEKTART: dict[int, str | None] = {
-    0: "motorway_link",   # Ausfahrt (exit ramp)
-    1: "motorway_link",   # Einfahrt (entry ramp)
-    2: "motorway",        # Autobahn
-    3: "service",         # Raststaette (rest-area service road)
-    4: None,              # Verbindung (virtual connector axis)
-    5: "unclassified",    # Zufahrt (ramp<->road link)
-    6: "service",         # Dienstzufahrt (maintenance/service access)
-    8: "secondary",       # 10m Strasse (wide main road)
-    9: "tertiary",        # 6m Strasse
-    10: "unclassified",   # 4m Strasse
-    11: "residential",    # 3m Strasse (narrow side road)
-    12: "service",        # Platz (square / parking axis)
-    13: None,             # Autozug (car-carrying train route)
-    14: None,             # Faehre (ferry) -> special-cased to route=ferry
-    15: "track",          # 2m Weg (drivable track)
-    16: "path",           # 1m Weg
-    17: "path",           # 1m Wegfragment
-    18: "track",          # 2m Wegfragment
-    19: "path",           # Markierte Spur (marked route)
-    20: "primary",        # 8m Strasse
-    21: "trunk",          # Autostrasse (expressway)
-    22: "path",           # Klettersteig (via ferrata)
-    23: "path",           # Provisorium (provisional slow-traffic axis)
+# TLM_STRASSE.OBJEKTART -> highway. (Code 14 Faehre is special-cased to route=ferry.)
+ROAD_OBJEKTART = {
+    0: {"highway": "motorway_link"},   # Ausfahrt (exit ramp)
+    1: {"highway": "motorway_link"},   # Einfahrt (entry ramp)
+    2: {"highway": "motorway"},        # Autobahn
+    3: {"highway": "service"},         # Raststaette (rest-area service road)
+    4: None,                           # Verbindung (virtual connector axis)
+    5: {"highway": "unclassified"},    # Zufahrt (ramp<->road link)
+    6: {"highway": "service"},         # Dienstzufahrt (service access)
+    8: {"highway": "secondary"},       # 10m Strasse (wide main road)
+    9: {"highway": "tertiary"},        # 6m Strasse
+    10: {"highway": "unclassified"},   # 4m Strasse
+    11: {"highway": "residential"},    # 3m Strasse (narrow side road)
+    12: {"highway": "service"},        # Platz (square / parking axis)
+    13: None,                          # Autozug (car-carrying train route)
+    14: None,                          # Faehre (ferry) -> route=ferry (special-cased)
+    15: {"highway": "track"},          # 2m Weg (drivable track)
+    16: {"highway": "path"},           # 1m Weg
+    17: {"highway": "path"},           # 1m Wegfragment
+    18: {"highway": "track"},          # 2m Wegfragment
+    19: {"highway": "path"},           # Markierte Spur (marked route)
+    20: {"highway": "primary"},        # 8m Strasse
+    21: {"highway": "trunk"},          # Autostrasse (expressway)
+    22: {"highway": "path"},           # Klettersteig (via ferrata)
+    23: {"highway": "path"},           # Provisorium (provisional slow-traffic axis)
 }
-ROAD_HIGHWAY_DEFAULT = "road"
+ROAD_DEFAULT = {"highway": "road"}
+ROAD_HIGHWAY_DEFAULT = "road"  # back-compat alias for the default highway value
 
-# TLM_FLIESSGEWAESSER.OBJEKTART -> tags (None drops penstocks / virtual axes).
-WATERWAY_OBJEKTART: dict[int, dict[str, str] | None] = {
+# TLM_EISENBAHN.OBJEKTART -> railway.
+RAILWAY_OBJEKTART = {
+    0: {"railway": "rail"},            # Normalspur (standard gauge)
+    2: {"railway": "narrow_gauge"},    # Schmalspur
+    4: {"railway": "rail"},            # Schmalspur mit Normalspur (three-rail)
+    5: {"railway": "narrow_gauge"},    # Kleinbahn
+}
+RAILWAY_DEFAULT = {"railway": "rail"}
+
+# TLM_UEBRIGE_BAHN.OBJEKTART -> aerialway (None drops conveyors / vertical lifts).
+AERIALWAY_OBJEKTART = {
+    0: {"aerialway": "cable_car"},     # Luftseilbahn
+    1: {"aerialway": "gondola"},       # Gondelbahn
+    2: {"aerialway": "chair_lift"},    # Sesselbahn
+    3: {"aerialway": "goods"},         # Transportseil (material ropeway)
+    4: None,                           # Foerderband (conveyor belt)
+    5: {"aerialway": "drag_lift"},     # Skilift
+    7: None,                           # Lift (public vertical lift)
+}
+
+# TLM_BODENBEDECKUNG.OBJEKTART -> land-cover area tags.
+LANDCOVER_OBJEKTART = {
+    1: {"natural": "bare_rock"},       # Fels
+    2: {"natural": "bare_rock"},       # Fels locker
+    3: {"natural": "scree"},           # Felsbloecke
+    4: {"natural": "scree"},           # Felsbloecke locker
+    5: {"natural": "water"},           # Fliessgewaesser (river surface)
+    6: {"natural": "scrub"},           # Gebueschwald (brush forest)
+    7: {"natural": "scree"},           # Lockergestein
+    8: {"natural": "scree"},           # Lockergestein locker
+    9: {"natural": "glacier"},         # Gletscher
+    10: {"natural": "water"},          # Stehende Gewaesser (lake)
+    11: {"natural": "wetland"},        # Feuchtgebiet
+    12: {"natural": "wood"},           # Wald
+    13: {"natural": "wood"},           # Wald offen
+    14: {"natural": "scrub"},          # Gehoelzflaeche
+    15: {"natural": "glacier"},        # Schneefeld Toteis
+}
+
+# TLM_EINZELOBJEKT.OBJEKTART -> POI node tags.
+POI_OBJEKTART = {
+    1: {"historic": "wayside_shrine"}, # Bildstock
+    2: {"amenity": "fountain"},        # Brunnen
+    3: {"historic": "monument"},       # Denkmal
+    4: {"man_made": "cross"},          # Gipfelkreuz (summit cross)
+    5: {"natural": "cave_entrance"},   # Grotte, Hoehle
+    6: {"historic": "boundary_stone"}, # Landesgrenzstein
+    7: {"natural": "spring"},          # Quelle
+    8: {"man_made": "survey_point"},   # Triangulationspyramide
+    9: {"waterway": "waterfall"},      # Wasserfall
+    10: {"man_made": "water_works"},   # Wasserversorgung
+}
+
+# TLM_MAUER.OBJEKTART -> barrier.
+BARRIER_OBJEKTART = {
+    0: {"barrier": "wall"},            # Mauer
+}
+BARRIER_DEFAULT = {"barrier": "wall"}
+
+# TLM_FLIESSGEWAESSER.OBJEKTART -> waterway lines (None drops penstocks / virtual axes).
+WATERWAY_OBJEKTART = {
     0: {"waterway": "canal"},                          # Bisse / Suone (irrigation)
     1: None, 2: None, 3: None,                         # Druckleitung / -stollen (penstocks)
     4: {"waterway": "stream"},                         # Fliessgewaesser (stream / river)
@@ -91,27 +150,34 @@ WATERWAY_OBJEKTART: dict[int, dict[str, str] | None] = {
 }
 WATERWAY_DEFAULT = {"waterway": "stream"}
 
-# TLM_BODENBEDECKUNG.OBJEKTART -> tags. The water polygons (filtered via
-# LAYER_WHERE) become filled water areas; any other land cover is dropped.
-WATER_AREA_OBJEKTART: dict[int, dict[str, str] | None] = {
-    5: {"natural": "water"},    # Fliessgewaesser (river surface)
-    10: {"natural": "water"},   # Stehende Gewaesser (lake)
-}
-
-# TLM_STEHENDES_GEWAESSER.OBJEKTART (shoreline *lines*, not in the default set).
-# Kept for explicit --tlm-layer use; code 1 = lake outline, 0 = island outline.
-LAKE_OBJEKTART: dict[int, dict[str, str] | None] = {
+# TLM_STEHENDES_GEWAESSER.OBJEKTART (shoreline *lines*, non-default — see
+# topovert-ktq). Code 1 = lake outline, 0 = island outline.
+LAKE_OBJEKTART = {
     0: None,                    # Seeinsel (island shoreline)
     1: {"natural": "water"},    # See (Seeuferlinie)
 }
 
+# kind -> (OBJEKTART table, default tags (None = drop unknown code), NAME fields).
+_KIND_TABLES: dict[str, tuple[dict, dict | None, tuple[str, ...]]] = {
+    "road":       (ROAD_OBJEKTART,      ROAD_DEFAULT,         ("strassenname", "name")),
+    "railway":    (RAILWAY_OBJEKTART,   RAILWAY_DEFAULT,      ("name",)),
+    "aerialway":  (AERIALWAY_OBJEKTART, None,                 ("name",)),
+    "landcover":  (LANDCOVER_OBJEKTART, None,                 ("name",)),
+    "poi":        (POI_OBJEKTART,       None,                 ("name",)),
+    "barrier":    (BARRIER_OBJEKTART,   BARRIER_DEFAULT,      ("name",)),
+    "waterway":   (WATERWAY_OBJEKTART,  WATERWAY_DEFAULT,     ("name",)),
+    "water_line": (LAKE_OBJEKTART,      {"natural": "water"}, ("name",)),
+    "building":   ({},                  {"building": "yes"},  ("name",)),
+}
+
 # Aggregated "tag map" (the data driving :func:`tags_for`), exposed for tests/tools.
-TAG_MAP = {
-    "road": ROAD_OBJEKTART,
-    "waterway": WATERWAY_OBJEKTART,
-    "water_area": WATER_AREA_OBJEKTART,
-    "water_line": LAKE_OBJEKTART,
-    "building": {"*": {"building": "yes"}},
+TAG_MAP = {kind: spec[0] for kind, spec in _KIND_TABLES.items()}
+
+# Export only the OBJEKTART rows we actually map (keeps big layers cheap). Built
+# from the land-cover table so widening coverage updates the filter automatically.
+LAYER_WHERE = {
+    "TLM_BODENBEDECKUNG": "OBJEKTART IN ("
+    + ", ".join(str(c) for c in sorted(LANDCOVER_OBJEKTART)) + ")",
 }
 
 
@@ -141,14 +207,22 @@ def _layer_kind(layer: str) -> str | None:
     name = layer.lower()
     if "strasse" in name:
         return "road"
+    if "eisenbahn" in name:
+        return "railway"
+    if "uebrige_bahn" in name:
+        return "aerialway"
     if "fliessgewaesser" in name:
         return "waterway"
     if "bodenbedeckung" in name:
-        return "water_area"      # filtered to water polygons via LAYER_WHERE
-    if "stehende" in name or "see" in name:
-        return "water_line"      # shoreline lines (non-default)
+        return "landcover"
+    if "einzelobjekt" in name:
+        return "poi"
+    if "mauer" in name:
+        return "barrier"
     if "gebaeude" in name:
         return "building"
+    if "stehende" in name or "see" in name:
+        return "water_line"      # shoreline lines (non-default)
     return None
 
 
@@ -156,44 +230,26 @@ def tags_for(layer: str, props: dict) -> dict[str, str] | None:
     """OSM tags for a swissTLM3D feature, or ``None`` to drop it.
 
     Keyed by the logical kind derived from ``layer`` and the integer ``OBJEKTART``
-    code; the source name (``STRASSENNAME``/``NAME``) is carried through.
+    code (see :data:`_KIND_TABLES`); the source name is carried through.
     """
     kind = _layer_kind(layer)
-    if kind is None:
+    spec = _KIND_TABLES.get(kind or "")
+    if spec is None:
         return None
+    table, default, name_fields = spec
     code = _int_prop(props, "objektart")
 
-    if kind == "road":
-        if code == 14:  # Faehre
-            tags: dict[str, str] = {"route": "ferry"}
-        else:
-            highway = ROAD_OBJEKTART.get(code, ROAD_HIGHWAY_DEFAULT)
-            if highway is None:
-                return None
-            tags = {"highway": highway}
-        name = _prop(props, "strassenname", "name")
-    elif kind == "waterway":
-        base = WATERWAY_OBJEKTART.get(code, WATERWAY_DEFAULT)
-        if base is None:
-            return None
-        tags = dict(base)
-        name = _prop(props, "name")
-    elif kind == "water_area":
-        base = WATER_AREA_OBJEKTART.get(code)
-        if base is None:
-            return None
-        tags = dict(base)
-        name = _prop(props, "name")
-    elif kind == "water_line":
-        base = LAKE_OBJEKTART.get(code, {"natural": "water"})
-        if base is None:
-            return None
-        tags = dict(base)
-        name = _prop(props, "name")
-    else:  # building
-        tags = {"building": "yes"}
-        name = _prop(props, "name")
+    if kind == "road" and code == 14:  # Faehre
+        base: dict | None = {"route": "ferry"}
+    elif code in table:
+        base = table[code]            # explicit mapping (may be None -> drop)
+    else:
+        base = default                # unknown code -> default (may be None -> drop)
+    if base is None:
+        return None
 
+    tags = dict(base)
+    name = _prop(props, *name_fields)
     if name:
         tags["name"] = name
     return tags

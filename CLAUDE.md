@@ -8,10 +8,10 @@ Topovert converts freely available [Swisstopo](https://www.swisstopo.admin.ch/de
 data into `.IMG` files installable on Garmin navigation devices.
 
 **v1 (current) is one vertical slice:** a local directory of swissALTI3D GeoTIFF elevation tiles
-(EPSG:2056 / LV95) → a hill-shaded Garmin `.IMG`. An **optional** `--tlm <swissTLM3D.gpkg>` adds
-the first slice of vector features (roads, watercourses, lakes, buildings). Contour lines,
-broader swissTLM3D coverage, splitter tiling, and area auto-download are deferred — tracked as
-beads issues (`bd list`).
+(EPSG:2056 / LV95) → a hill-shaded Garmin `.IMG`. An **optional** `--tlm <swissTLM3D>` overlays
+vector features — roads/paths, railways, aerialways, watercourses, land cover (water/forest/rock/
+glacier/wetland), buildings, POIs, and walls. Contour lines, splitter tiling, and area
+auto-download are deferred — tracked as beads issues (`bd list`).
 
 ## Stack & architecture
 

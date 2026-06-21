@@ -35,7 +35,7 @@ uv sync
 # Point at a folder of swissALTI3D *.tif tiles; get a hill-shaded .IMG
 uv run topovert build --dem-dir ./swissalti3d_tiles --out ./out/swiss.img
 
-# Optionally overlay swissTLM3D vector features (roads, watercourses, water, buildings)
+# Optionally overlay swissTLM3D vector features (roads, rail, water, land cover, buildings, POIs)
 uv run topovert build --dem-dir ./swissalti3d_tiles \
     --tlm ./SWISSTLM3D_CHLV95LN02.gdb --out ./out/swiss.img
 ```
