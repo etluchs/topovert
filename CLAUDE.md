@@ -14,6 +14,21 @@ buildings, POIs, and walls. Either input is optional: `--tlm` alone makes a **ve
 (no DEM), `--dem-dir` alone a hillshade-only map. Large extents (up to whole-country) are tiled
 with **splitter** automatically. Contour lines and area auto-download are deferred (`bd list`).
 
+## Keep the docs in sync
+
+**When you change user-facing behaviour, update the docs in the same commit** — they drift fast
+otherwise. The sources of truth are this `CLAUDE.md`, `README.md`, and the `argparse` help strings
+in `cli.py`. Concretely:
+
+- New/renamed/removed CLI flags or commands → update `cli.py` help, the `README.md` **Usage** block,
+  and the `## Commands` section here.
+- Capabilities shipping or moving from "planned" → "done" → update the `README.md` **Status**/**Features**
+  sections and the **What the project does** summary above.
+- Input/output formats, prerequisites, or version pins → update wherever they're named (e.g. swissTLM3D
+  is a `.gdb`, not `.gpkg`; Java ≥ 1.8; Python ≥ 3.11).
+
+Before ending a session that touched code, skim `README.md` and this file for stale claims.
+
 ## Stack & architecture
 
 **Decided by a stability-and-simplicity-first rule:** a thin **Python** orchestrator (stdlib only,
