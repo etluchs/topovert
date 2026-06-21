@@ -56,6 +56,7 @@ def build(
     tlm_path: Path | None = None,
     tlm_layers: list[str] | None = None,
     max_nodes: int = splitter.DEFAULT_MAX_NODES,
+    work_dir: Path | None = None,
     keep_intermediate: bool = False,
 ) -> BuildResult:
     """Build a Garmin ``.IMG`` from a DEM and/or swissTLM3D vectors.
@@ -87,7 +88,12 @@ def build(
     out_path = out_path.resolve()
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    workdir = Path(tempfile.mkdtemp(prefix="topovert-"))
+    # Whole-country intermediates reach tens of GB, so default the workdir to the
+    # output filesystem (next to --out) rather than the system temp, which is
+    # often a small RAM-backed tmpfs. Override with --work-dir.
+    if work_dir is not None:
+        work_dir.mkdir(parents=True, exist_ok=True)
+    workdir = Path(tempfile.mkdtemp(prefix="topovert-", dir=str(work_dir or out_path.parent)))
     log.debug("workdir: %s", workdir)
     try:
         # --- bounds, and the optional DEM (HGT tiles) -----------------------

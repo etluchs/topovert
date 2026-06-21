@@ -66,6 +66,11 @@ def _build_parser() -> argparse.ArgumentParser:
              "splitter's own ~1.6M); only used when the map needs tiling",
     )
     b.add_argument(
+        "--work-dir", type=Path, default=None,
+        help="directory for (large) intermediates; defaults next to --out. Point "
+             "it at a roomy filesystem for whole-country builds (avoid small tmpfs)",
+    )
+    b.add_argument(
         "--keep-intermediate", action="store_true",
         help="keep the temp workdir (VRT, HGT tiles, OSM, GeoJSON) for inspection",
     )
@@ -84,6 +89,7 @@ def _cmd_build(args: argparse.Namespace) -> int:
         tlm_path=args.tlm,
         tlm_layers=args.tlm_layers,
         **({"max_nodes": args.max_nodes} if args.max_nodes else {}),
+        work_dir=args.work_dir,
         keep_intermediate=args.keep_intermediate,
     )
     dem = f"{len(result.tiles)} DEM tile(s)" if result.tiles else "no DEM"
