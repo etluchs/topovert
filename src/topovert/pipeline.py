@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import TopovertError
-from . import gdal_tools, jars, mkgmap, osm
+from . import gdal_tools, jars, mkgmap, osm, vector
 from .hgt import DEFAULT_RESOLUTION, DEM_RESOLUTIONS, tiles_for_bounds
 
 log = logging.getLogger(__name__)
@@ -49,12 +49,15 @@ def build(
     resampling: str = "bilinear",
     source_epsg: int = DEFAULT_SOURCE_EPSG,
     map_name: str = "topovert",
+    tlm_path: Path | None = None,
+    tlm_layers: list[str] | None = None,
     keep_intermediate: bool = False,
 ) -> BuildResult:
     """Convert a directory of DEM GeoTIFFs into a single hill-shaded ``.IMG``.
 
     Steps: preflight -> mosaic (VRT) -> compute WGS84 bounds -> per-tile warp +
-    SRTMHGT conversion -> minimal bounds OSM -> mkgmap ``--dem`` -> copy result.
+    SRTMHGT conversion -> OSM (bounds-only, or swissTLM3D vector features when
+    ``tlm_path`` is given) -> mkgmap ``--dem`` -> copy result.
     """
     if resolution not in DEM_RESOLUTIONS:
         raise TopovertError(
@@ -66,6 +69,10 @@ def build(
     gdal_tools.check_available()
     tifs = _find_geotiffs(dem_dir)
     java = jars.find_java()
+    if tlm_path is not None:
+        tlm_path = tlm_path.resolve()
+        if not tlm_path.exists():
+            raise TopovertError(f"--tlm source not found: {tlm_path}")
 
     out_path = out_path.resolve()
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -89,11 +96,19 @@ def build(
                 source_epsg=source_epsg, resampling=resampling,
             )
 
-        bounds_osm = osm.write_bounds_osm(bounds, workdir / "bounds.osm", name=map_name)
+        if tlm_path is not None:
+            layers = tlm_layers or list(vector.DEFAULT_TLM_LAYERS)
+            log.info("converting swissTLM3D features from %s: %s", tlm_path, layers)
+            map_osm = vector.build_features_osm(
+                tlm_path, layers, bounds, workdir / "features.osm",
+                source_epsg=source_epsg,
+            )
+        else:
+            map_osm = osm.write_bounds_osm(bounds, workdir / "bounds.osm", name=map_name)
 
         jar = jars.ensure_mkgmap()
         img = mkgmap.build_img(
-            java, jar, bounds_osm, hgt_dir, workdir / "out", map_name=map_name
+            java, jar, map_osm, hgt_dir, workdir / "out", map_name=map_name
         )
 
         shutil.copyfile(img, out_path)

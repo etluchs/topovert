@@ -49,6 +49,17 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     b.add_argument("--name", default="topovert", help="map name/description")
     b.add_argument(
+        "--tlm", type=Path, default=None,
+        help="optional swissTLM3D GeoPackage (.gpkg) to add vector features "
+             "(roads, water, buildings); omit for a hillshade-only map",
+    )
+    b.add_argument(
+        "--tlm-layer", dest="tlm_layers", action="append", default=None,
+        metavar="LAYER",
+        help="swissTLM3D layer to include (repeatable); overrides the default "
+             "core-nav set when given",
+    )
+    b.add_argument(
         "--keep-intermediate", action="store_true",
         help="keep the temp workdir (VRT, HGT tiles, OSM) for inspection",
     )
@@ -64,6 +75,8 @@ def _cmd_build(args: argparse.Namespace) -> int:
         resampling=args.resampling,
         source_epsg=args.source_epsg,
         map_name=args.name,
+        tlm_path=args.tlm,
+        tlm_layers=args.tlm_layers,
         keep_intermediate=args.keep_intermediate,
     )
     print(f"Wrote {result.out_path} ({len(result.tiles)} DEM tile(s)).")

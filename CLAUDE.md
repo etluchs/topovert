@@ -8,8 +8,10 @@ Topovert converts freely available [Swisstopo](https://www.swisstopo.admin.ch/de
 data into `.IMG` files installable on Garmin navigation devices.
 
 **v1 (current) is one vertical slice:** a local directory of swissALTI3D GeoTIFF elevation tiles
-(EPSG:2056 / LV95) → a hill-shaded Garmin `.IMG`. Vector features (swissTLM3D), contour lines,
-and area auto-download are deferred — tracked as beads issues (`bd list`).
+(EPSG:2056 / LV95) → a hill-shaded Garmin `.IMG`. An **optional** `--tlm <swissTLM3D.gpkg>` adds
+the first slice of vector features (roads, watercourses, lakes, buildings). Contour lines,
+broader swissTLM3D coverage, splitter tiling, and area auto-download are deferred — tracked as
+beads issues (`bd list`).
 
 ## Stack & architecture
 
@@ -17,16 +19,20 @@ and area auto-download are deferred — tracked as beads issues (`bd list`).
 zero runtime pip deps) that shells out to two mature external toolchains and writes almost no
 geospatial/encoding code itself:
 
-- **GDAL command-line tools** (`gdalbuildvrt`, `gdalwarp`, `gdal_translate`, `gdalinfo`) — reprojection
-  and raster conversion. We use the **CLI, not the `osgeo.gdal` bindings** (far easier cross-platform
-  install, version-tolerant).
+- **GDAL command-line tools** (`gdalbuildvrt`, `gdalwarp`, `gdal_translate`, `gdalinfo`, `ogr2ogr`) —
+  reprojection, raster conversion, and vector export. We use the **CLI, not the `osgeo.gdal`
+  bindings** (far easier cross-platform install, version-tolerant). This is also why the vector path
+  uses `ogr2ogr → GeoJSON → our own OSM writer` rather than `ogr2pbf` (which needs the `osgeo`
+  bindings) — see `bd show topovert-rn1`.
 - **mkgmap** (Java) — does all Garmin `.IMG` encoding, including embedding the DEM for hillshading.
 
 Pipeline (`src/topovert/pipeline.py:build`): GeoTIFFs → `gdalbuildvrt` mosaic → WGS84 bounds →
 per-1°-tile `gdalwarp` (reproject 2056→4326, resample to SRTM1/3, exact grid) + `gdal_translate -of
-SRTMHGT` → minimal bounds `.osm` → `mkgmap --dem`. Modules: `hgt.py` (pure SRTM tiling geometry —
-fully unit-tested), `gdal_tools.py` (GDAL argv builders + exec), `osm.py` (minimal OSM), `jars.py`
-(Java discovery + mkgmap auto-download/cache), `mkgmap.py` (the `.IMG` build), `cli.py`.
+SRTMHGT` → `.osm` (bounds-only, or swissTLM3D vector features when `--tlm` is given) → `mkgmap --dem`.
+Modules: `hgt.py` (pure SRTM tiling geometry — fully unit-tested), `gdal_tools.py` (GDAL argv builders
++ exec), `osm.py` (OSM XML writer + shared node/way serializers), `vector.py` (swissTLM3D → GeoJSON →
+OSM with a data-only `TAG_MAP`), `jars.py` (Java discovery + mkgmap auto-download/cache), `mkgmap.py`
+(the `.IMG` build), `cli.py`.
 
 The README's "browser + WASM" idea is **incompatible** with this GDAL+JVM pipeline; v1 is a local CLI.
 

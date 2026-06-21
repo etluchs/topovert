@@ -21,7 +21,8 @@ from .hgt import Tile
 log = logging.getLogger(__name__)
 
 # GDAL utilities topovert depends on; checked together in :func:`check_available`.
-REQUIRED_TOOLS = ("gdalbuildvrt", "gdalwarp", "gdal_translate", "gdalinfo")
+# ogr2ogr/ogrinfo are needed for the swissTLM3D vector path (ship with gdal-bin).
+REQUIRED_TOOLS = ("gdalbuildvrt", "gdalwarp", "gdal_translate", "gdalinfo", "ogr2ogr")
 
 # SRTM "no data" sentinel (big-endian int16). mkgmap reads this as a void sample.
 HGT_VOID = -32768

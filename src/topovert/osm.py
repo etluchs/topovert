@@ -1,51 +1,87 @@
-"""Synthesize the minimal OSM file mkgmap needs alongside ``--dem``.
+"""Synthesize the OSM input mkgmap needs alongside ``--dem``.
 
-mkgmap embeds the DEM as a subfile of a *map*, so it still needs some OSM input
-to build that map. For the v1 hillshading-only slice we have no vector features
-yet, so we emit a tiny valid ``.osm``: the data bounds, a closed way around them
-(tagged with an innocuous area type), and a single named locality POI at the
-centre so the produced map is unambiguously non-empty.
+mkgmap embeds the DEM as a subfile of a *map*, so it always needs some OSM input
+to build that map. Two cases share the same primitives here:
+
+* **hillshade-only** (no ``--tlm``): we emit a tiny valid ``.osm`` — the data
+  bounds, a closed way around them (innocuous area type) and one named locality
+  POI at the centre — so the produced map is unambiguously non-empty.
+* **with vector features** (:mod:`topovert.vector`): the converter reuses the
+  ``<bounds>``/node/way serializers below to stream swissTLM3D features into one
+  combined ``.osm``.
+
+Node/way ids are negative (the OSM convention for not-yet-uploaded objects);
+:func:`escape_attr` keeps tag values XML-safe.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
+from xml.sax.saxutils import escape
 
-_TEMPLATE = """\
-<?xml version='1.0' encoding='UTF-8'?>
-<osm version='0.6' generator='topovert'>
-  <bounds minlat='{min_lat:.7f}' minlon='{min_lon:.7f}' maxlat='{max_lat:.7f}' maxlon='{max_lon:.7f}'/>
-  <node id='-1' lat='{min_lat:.7f}' lon='{min_lon:.7f}'/>
-  <node id='-2' lat='{min_lat:.7f}' lon='{max_lon:.7f}'/>
-  <node id='-3' lat='{max_lat:.7f}' lon='{max_lon:.7f}'/>
-  <node id='-4' lat='{max_lat:.7f}' lon='{min_lon:.7f}'/>
-  <node id='-5' lat='{ctr_lat:.7f}' lon='{ctr_lon:.7f}'>
-    <tag k='place' v='locality'/>
-    <tag k='name' v='{name}'/>
-  </node>
-  <way id='-1'>
-    <nd ref='-1'/>
-    <nd ref='-2'/>
-    <nd ref='-3'/>
-    <nd ref='-4'/>
-    <nd ref='-1'/>
-    <tag k='natural' v='heath'/>
-  </way>
-</osm>
-"""
+OSM_HEADER = "<?xml version='1.0' encoding='UTF-8'?>\n<osm version='0.6' generator='topovert'>\n"
+OSM_FOOTER = "</osm>\n"
+
+# All attributes are single-quoted (matching the original template), so the
+# escape map must cover the apostrophe plus newlines/tabs that would break a line.
+_ATTR_ESCAPES = {"'": "&apos;", "\n": "&#10;", "\t": "&#9;", "\r": "&#13;"}
+
+
+def escape_attr(value: str) -> str:
+    """Single-quote-safe rendering of ``value`` (handles ``&``, ``<``, ``>``, ``'``)."""
+    return escape(value, _ATTR_ESCAPES)
+
+
+def bounds_element(bounds: tuple[float, float, float, float]) -> str:
+    """``<bounds>`` line for ``(min_lon, min_lat, max_lon, max_lat)``."""
+    min_lon, min_lat, max_lon, max_lat = bounds
+    return (
+        f"  <bounds minlat='{min_lat:.7f}' minlon='{min_lon:.7f}' "
+        f"maxlat='{max_lat:.7f}' maxlon='{max_lon:.7f}'/>\n"
+    )
+
+
+def node_xml(node_id: int, lat: float, lon: float, tags: dict[str, str] | None = None) -> str:
+    """A ``<node>`` element; childless when ``tags`` is empty."""
+    head = f"  <node id='{node_id}' lat='{lat:.7f}' lon='{lon:.7f}'"
+    if not tags:
+        return head + "/>\n"
+    body = "".join(_tag_xml(k, v, indent=4) for k, v in tags.items())
+    return head + ">\n" + body + "  </node>\n"
+
+
+def way_xml(way_id: int, node_ids: list[int], tags: dict[str, str] | None = None) -> str:
+    """A ``<way>`` referencing ``node_ids`` in order, with ``tags``."""
+    refs = "".join(f"    <nd ref='{nid}'/>\n" for nid in node_ids)
+    body = "".join(_tag_xml(k, v, indent=4) for k, v in (tags or {}).items())
+    return f"  <way id='{way_id}'>\n" + refs + body + "  </way>\n"
+
+
+def _tag_xml(key: str, value: str, *, indent: int) -> str:
+    pad = " " * indent
+    return f"{pad}<tag k='{escape_attr(key)}' v='{escape_attr(value)}'/>\n"
 
 
 def write_bounds_osm(
     bounds: tuple[float, float, float, float], dst: Path, name: str = "topovert"
 ) -> Path:
-    """Write the minimal bounds ``.osm`` for ``bounds`` (min_lon,min_lat,max_lon,max_lat)."""
+    """Write the minimal bounds ``.osm`` for ``bounds`` (min_lon,min_lat,max_lon,max_lat).
+
+    Used for the hillshade-only build (no vector features). Emits the bounds, a
+    closed ring tagged ``natural=heath`` and a single named locality POI so the
+    map is non-empty.
+    """
     min_lon, min_lat, max_lon, max_lat = bounds
-    dst.write_text(
-        _TEMPLATE.format(
-            min_lon=min_lon, min_lat=min_lat, max_lon=max_lon, max_lat=max_lat,
-            ctr_lon=(min_lon + max_lon) / 2, ctr_lat=(min_lat + max_lat) / 2,
-            name=name,
-        ),
-        encoding="utf-8",
-    )
+    ctr_lon, ctr_lat = (min_lon + max_lon) / 2, (min_lat + max_lat) / 2
+
+    parts = [OSM_HEADER, bounds_element(bounds)]
+    parts.append(node_xml(-1, min_lat, min_lon))
+    parts.append(node_xml(-2, min_lat, max_lon))
+    parts.append(node_xml(-3, max_lat, max_lon))
+    parts.append(node_xml(-4, max_lat, min_lon))
+    parts.append(node_xml(-5, ctr_lat, ctr_lon, {"place": "locality", "name": name}))
+    parts.append(way_xml(-1, [-1, -2, -3, -4, -1], {"natural": "heath"}))
+    parts.append(OSM_FOOTER)
+
+    dst.write_text("".join(parts), encoding="utf-8")
     return dst
