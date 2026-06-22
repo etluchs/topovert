@@ -75,8 +75,29 @@ Because the source is not LV95, tell the warp its projection with `--source-epsg
 uv run topovert build --dem-dir ./glo30_tiles --source-epsg 4326 --out ./out/swiss-glo30.img
 ```
 
-This builds a ~90 MB country-wide `gmapsupp.img` in under a minute on a laptop. Add `--tlm` for
-vector overlays, or `--dem-resolution 3as` for an even smaller ~90 m map.
+This builds a ~90 MB country-wide `gmapsupp.img` in under a minute on a laptop. Use
+`--dem-resolution 3as` for an even smaller ~90 m map.
+
+### Combining a non-LV95 DEM with swissTLM3D vectors
+
+`--source-epsg` is applied to **both** the DEM and the `--tlm` source, so they must share one CRS.
+swissTLM3D is EPSG:2056 (LV95), so a Copernicus (EPSG:4326) DEM can't be combined with it directly.
+Reproject the DEM to LV95 first, then build everything as `--source-epsg 2056`:
+
+```bash
+# 1. one-time: reproject the Copernicus tiles to LV95 (~30 m grid)
+gdalbuildvrt glo30.vrt ./glo30_tiles/*.tif
+gdalwarp -t_srs EPSG:2056 -tr 30 30 -r bilinear glo30.vrt ./glo30_2056/glo30_ch_2056.tif
+
+# 2. whole-Switzerland hillshade + full swissTLM3D vector overlay
+uv run topovert build --dem-dir ./glo30_2056 --source-epsg 2056 \
+    --tlm ./SWISSTLM3D_2026_LV95_LN02.gdb --out ./out/swiss-glo30-tlm.img
+```
+
+The country-wide vector layer is ~167 M nodes, so splitter tiles it automatically (~112 tiles);
+the run takes ~30 min and yields a ~250 MB `gmapsupp.img` with roads/routing, land cover,
+buildings, watercourses and the hillshade. (A 4326 DEM with a 2056 `--tlm` in one command is a
+known limitation — see `bd show topovert-0zt`.)
 
 > **Datum note:** Copernicus/SRTM heights are geoid-referenced (EGM2008/EGM96) while swissALTI3D is
 > ellipsoidal, so *absolute* elevations differ by the geoid separation (~46–50 m in Switzerland).
