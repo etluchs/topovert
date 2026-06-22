@@ -55,3 +55,29 @@ uv run topovert build --tlm ./SWISSTLM3D_CHLV95LN02.gdb --out ./out/swiss.img
 
 Then copy the `.IMG` to your Garmin device (or load it in BaseCamp) to see the shaded relief.
 Run `topovert build --help` for options (resolution, resampling, source EPSG, `--tlm`/`--tlm-layer`).
+
+## Choosing a DEM source
+
+The hillshade is downsampled to an SRTM grid before mkgmap embeds it — `--dem-resolution 1as`
+(default, ~30 m) or `3as` (~90 m). So feeding full-resolution **swissALTI3D (0.5 m)** for a large
+area downloads terabytes only to throw almost all of it away. For anything bigger than a small,
+high-detail extent, start from a source that is *already* near the target resolution:
+
+- **Copernicus DEM GLO-30** (~30 m) — free, global, ships as GeoTIFF in **EPSG:4326**. All of
+  Switzerland is 18 one-degree tiles (~730 MB) from the [AWS Open Data mirror](https://registry.opendata.aws/copernicus-dem/),
+  e.g. `https://copernicus-dem-30m.s3.amazonaws.com/Copernicus_DSM_COG_10_N47_00_E007_00_DEM/Copernicus_DSM_COG_10_N47_00_E007_00_DEM.tif`.
+- **swissALTI3D at 2 m** — same EPSG:2056 as the 0.5 m product (no flag change), ~16× smaller.
+
+Because the source is not LV95, tell the warp its projection with `--source-epsg`:
+
+```bash
+# Whole-Switzerland hillshade from Copernicus GLO-30 tiles (EPSG:4326)
+uv run topovert build --dem-dir ./glo30_tiles --source-epsg 4326 --out ./out/swiss-glo30.img
+```
+
+This builds a ~90 MB country-wide `gmapsupp.img` in under a minute on a laptop. Add `--tlm` for
+vector overlays, or `--dem-resolution 3as` for an even smaller ~90 m map.
+
+> **Datum note:** Copernicus/SRTM heights are geoid-referenced (EGM2008/EGM96) while swissALTI3D is
+> ellipsoidal, so *absolute* elevations differ by the geoid separation (~46–50 m in Switzerland).
+> This does not affect shaded relief; it only matters if you read off point elevations.
