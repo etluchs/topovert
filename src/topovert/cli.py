@@ -9,7 +9,7 @@ from pathlib import Path
 
 from . import TopovertError, __version__
 from .hgt import DEFAULT_RESOLUTION, DEM_RESOLUTIONS
-from .pipeline import DEFAULT_SOURCE_EPSG, build
+from .pipeline import build
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -45,8 +45,10 @@ def _build_parser() -> argparse.ArgumentParser:
              "often better for large downsampling)",
     )
     b.add_argument(
-        "--source-epsg", type=int, default=DEFAULT_SOURCE_EPSG,
-        help="EPSG code of the input DEM (default: %(default)s = Swiss LV95)",
+        "--source-epsg", type=int, default=None,
+        help="EPSG of the --dem-dir/--tlm sources (default: auto-detect each "
+             "from its own CRS). Set only to override sources lacking CRS "
+             "metadata; it then applies to both inputs, so they must share a CRS",
     )
     b.add_argument("--name", default="topovert", help="map name/description")
     b.add_argument(

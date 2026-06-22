@@ -18,6 +18,16 @@ def test_ogr_geojson_cmd_reprojects_to_wgs84_geojsonseq():
     assert cmd[-3:] == ["out.geojsonl", "tlm.gdb", "TLM_STRASSE"]
 
 
+def test_ogr_geojson_cmd_autodetects_source_crs_when_epsg_none():
+    """source_epsg=None drops -s_srs so ogr2ogr reads the layer's own CRS."""
+    cmd = vector.ogr_geojson_cmd(
+        Path("tlm.gdb"), "TLM_STRASSE", Path("out.geojsonl"), source_epsg=None
+    )
+    assert "-s_srs" not in cmd
+    assert cmd[cmd.index("-t_srs") + 1] == "EPSG:4326"
+    assert cmd[-3:] == ["out.geojsonl", "tlm.gdb", "TLM_STRASSE"]
+
+
 def test_tags_for_road_classes_use_integer_objektart():
     assert vector.tags_for("TLM_STRASSE", {"OBJEKTART": 2}) == {"highway": "motorway"}
     assert vector.tags_for("TLM_STRASSE", {"OBJEKTART": 21}) == {"highway": "trunk"}

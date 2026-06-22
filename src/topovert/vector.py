@@ -35,9 +35,6 @@ _EXTENT_RE = re.compile(
     r"Extent:\s*\(\s*([-\d.]+),\s*([-\d.]+)\s*\)\s*-\s*\(\s*([-\d.]+),\s*([-\d.]+)\s*\)"
 )
 
-# swissTLM3D ships as EPSG:2056 (LV95), same as the DEM.
-DEFAULT_SOURCE_EPSG = 2056
-
 # Default layers (exact swissTLM3D GDB names, uppercase). Adding a feature class
 # is data-only: classify it in :func:`_layer_kind` and give its OBJEKTART table
 # below. Classification is case-insensitive so other deliveries/casing resolve.
@@ -352,32 +349,54 @@ def geojson_to_osm(lines: Iterable[str], layer: str, ids: _IdAllocator) -> Itera
 
 
 def ogr_geojson_cmd(
-    src: Path, layer: str, dst: Path, *, source_epsg: int, where: str | None = None
+    src: Path, layer: str, dst: Path, *, source_epsg: int | None, where: str | None = None
 ) -> list[str]:
     """argv for ``ogr2ogr`` reprojecting one ``layer`` to WGS84 GeoJSONSeq.
 
+    ``source_epsg=None`` omits ``-s_srs`` so ogr2ogr reads the layer's own CRS
+    (the usual case); pass an int only to override a source lacking CRS metadata.
     ``where`` is an optional OGR SQL attribute filter applied at export time.
     """
-    cmd = [
-        "ogr2ogr",
-        "-f", "GeoJSONSeq",
-        "-s_srs", f"EPSG:{source_epsg}",
-        "-t_srs", "EPSG:4326",
-    ]
+    cmd = ["ogr2ogr", "-f", "GeoJSONSeq"]
+    if source_epsg is not None:
+        cmd += ["-s_srs", f"EPSG:{source_epsg}"]
+    cmd += ["-t_srs", "EPSG:4326"]
     if where:
         cmd += ["-where", where]
     cmd += [str(dst), str(src), layer]
     return cmd
 
 
+def _layer_srs(src: Path, layer: str) -> str | None:
+    """The layer's CRS as a WKT string (via ``ogrinfo -json``), or None.
+
+    Returned verbatim so it can be handed to ``gdaltransform -s_srs`` — this
+    avoids extracting a numeric EPSG, which is brittle for the compound
+    (horizontal + vertical) CRS swissTLM3D actually carries.
+    """
+    try:
+        out = gdal_tools._run(["ogrinfo", "-json", "-so", str(src), layer]).stdout
+    except TopovertError:
+        return None
+    for lyr in json.loads(out).get("layers", []):
+        for gf in lyr.get("geometryFields", []):
+            wkt = (gf.get("coordinateSystem") or {}).get("wkt")
+            if wkt:
+                return wkt
+    return None
+
+
 def _reproject(
-    points: list[tuple[float, float]], src_epsg: int, dst_epsg: int
+    points: list[tuple[float, float]], src_srs: str, dst_srs: str
 ) -> list[tuple[float, float]]:
-    """Reproject ``(x, y)`` points with the ``gdaltransform`` CLI (no bindings)."""
+    """Reproject ``(x, y)`` points with the ``gdaltransform`` CLI (no bindings).
+
+    ``src_srs``/``dst_srs`` are any SRS definition gdaltransform accepts
+    (``"EPSG:4326"`` or a full WKT string).
+    """
     stdin = "\n".join(f"{x} {y}" for x, y in points) + "\n"
     proc = subprocess.run(
-        ["gdaltransform", "-s_srs", f"EPSG:{src_epsg}", "-t_srs", f"EPSG:{dst_epsg}",
-         "-output_xy"],
+        ["gdaltransform", "-s_srs", src_srs, "-t_srs", dst_srs, "-output_xy"],
         input=stdin, capture_output=True, text=True,
     )
     if proc.returncode != 0:
@@ -391,15 +410,18 @@ def _reproject(
 
 
 def tlm_bounds(
-    src: Path, layers: Iterable[str], *, source_epsg: int = DEFAULT_SOURCE_EPSG
+    src: Path, layers: Iterable[str], *, source_epsg: int | None = None
 ) -> tuple[float, float, float, float]:
     """WGS84 ``(min_lon, min_lat, max_lon, max_lat)`` union extent of ``layers``.
 
     Used for vector-only builds (no DEM to derive bounds from). Reads each layer's
     native-CRS extent via ``ogrinfo`` and reprojects the corners to WGS84.
+    ``source_epsg=None`` auto-detects the source CRS from the layer (the usual
+    case); pass an int to override it.
     """
     xmin = ymin = float("inf")
     xmax = ymax = float("-inf")
+    src_srs: str | None = None
     for layer in layers:
         try:
             out = gdal_tools._run(["ogrinfo", "-so", str(src), layer]).stdout
@@ -411,11 +433,19 @@ def tlm_bounds(
         x0, y0, x1, y1 = (float(v) for v in m.groups())
         xmin, ymin = min(xmin, x0), min(ymin, y0)
         xmax, ymax = max(xmax, x1), max(ymax, y1)
+        if src_srs is None and source_epsg is None:
+            src_srs = _layer_srs(src, layer)  # all layers share one CRS
     if xmin == float("inf"):
         raise TopovertError(f"could not determine extent of {src} from {list(layers)}")
+    if source_epsg is not None:
+        src_srs = f"EPSG:{source_epsg}"
+    elif src_srs is None:
+        raise TopovertError(
+            f"could not determine the CRS of {src}; pass --source-epsg explicitly"
+        )
 
     corners = [(xmin, ymin), (xmax, ymin), (xmax, ymax), (xmin, ymax)]
-    lonlat = _reproject(corners, source_epsg, 4326)
+    lonlat = _reproject(corners, src_srs, "EPSG:4326")
     lons = [p[0] for p in lonlat]
     lats = [p[1] for p in lonlat]
     return (min(lons), min(lats), max(lons), max(lats))
@@ -427,7 +457,7 @@ def build_features_osm(
     bounds: tuple[float, float, float, float],
     dst: Path,
     *,
-    source_epsg: int = DEFAULT_SOURCE_EPSG,
+    source_epsg: int | None = None,
     keep_geojson: bool = False,
 ) -> int:
     """Convert ``layers`` of swissTLM3D ``src`` into one combined ``dst`` ``.osm``.

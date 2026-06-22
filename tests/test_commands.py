@@ -28,6 +28,17 @@ def test_warp_tile_cmd_has_reprojection_and_grid():
     assert cmd[-2:] == ["mosaic.vrt", "out.tif"]
 
 
+def test_warp_tile_cmd_autodetects_source_crs_when_epsg_none():
+    """source_epsg=None drops -s_srs so gdalwarp reads the file's own CRS."""
+    tile = Tile(lat=47, lon=8)
+    cmd = gdal_tools.warp_tile_cmd(
+        Path("mosaic.vrt"), Path("out.tif"), tile.warp_extent(3601), 3601,
+        source_epsg=None, resampling="bilinear",
+    )
+    assert "-s_srs" not in cmd
+    assert cmd[cmd.index("-t_srs") + 1] == "EPSG:4326"  # target still forced
+
+
 def test_translate_hgt_cmd_uses_srtmhgt():
     cmd = gdal_tools.translate_hgt_cmd(Path("t.tif"), Path("N47E008.hgt"))
     assert "-of" in cmd and "SRTMHGT" in cmd

@@ -71,20 +71,22 @@ def warp_tile_cmd(
     extent: tuple[float, float, float, float],
     samples: int,
     *,
-    source_epsg: int,
+    source_epsg: int | None,
     resampling: str,
 ) -> list[str]:
     """gdalwarp reprojecting ``src`` into one point-registered tile grid.
 
     ``-te``/``-ts`` pin the exact target extent and size so the output is a valid
     SRTM grid (see :meth:`topovert.hgt.Tile.warp_extent`); ``-t_srs EPSG:4326``
-    is the WGS84 that Garmin/mkgmap expect.
+    is the WGS84 that Garmin/mkgmap expect. ``source_epsg=None`` omits ``-s_srs``
+    so gdalwarp reads the source's own embedded CRS (the usual case); pass an int
+    only to override a source that lacks CRS metadata.
     """
     min_lon, min_lat, max_lon, max_lat = extent
-    return [
-        "gdalwarp",
-        "-overwrite",
-        "-s_srs", f"EPSG:{source_epsg}",
+    cmd = ["gdalwarp", "-overwrite"]
+    if source_epsg is not None:
+        cmd += ["-s_srs", f"EPSG:{source_epsg}"]
+    cmd += [
         "-t_srs", "EPSG:4326",
         "-te", f"{min_lon:.10f}", f"{min_lat:.10f}", f"{max_lon:.10f}", f"{max_lat:.10f}",
         "-ts", str(samples), str(samples),
@@ -96,6 +98,7 @@ def warp_tile_cmd(
         str(src),
         str(dst),
     ]
+    return cmd
 
 
 def translate_hgt_cmd(src_tif: Path, dst_hgt: Path) -> list[str]:
@@ -137,7 +140,7 @@ def make_hgt_tile(
     samples: int,
     dst_dir: Path,
     *,
-    source_epsg: int,
+    source_epsg: int | None,
     resampling: str,
 ) -> Path:
     """Warp + convert ``src`` into one ``dst_dir/<tile>.hgt`` file."""

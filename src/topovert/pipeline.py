@@ -15,7 +15,6 @@ from .hgt import DEFAULT_RESOLUTION, DEM_RESOLUTIONS, tiles_for_bounds
 log = logging.getLogger(__name__)
 
 _TIF_GLOBS = ("*.tif", "*.tiff", "*.TIF", "*.TIFF")
-DEFAULT_SOURCE_EPSG = 2056  # swissALTI3D / LV95
 
 # mkgmap reads DEM samples in a border *beyond* the map bounds, so data sitting
 # near a 1-degree tile edge makes it touch the neighbouring tile. We expand the
@@ -51,7 +50,7 @@ def build(
     *,
     resolution: str = DEFAULT_RESOLUTION,
     resampling: str = "bilinear",
-    source_epsg: int = DEFAULT_SOURCE_EPSG,
+    source_epsg: int | None = None,
     map_name: str = "topovert",
     tlm_path: Path | None = None,
     tlm_layers: list[str] | None = None,
