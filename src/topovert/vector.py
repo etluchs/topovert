@@ -21,7 +21,6 @@ from __future__ import annotations
 import json
 import logging
 import re
-import shutil
 import subprocess
 from collections.abc import Iterable, Iterator
 from pathlib import Path
@@ -451,6 +450,44 @@ def tlm_bounds(
     return (min(lons), min(lats), max(lons), max(lats))
 
 
+def iter_features_osm(
+    src: Path,
+    layers: Iterable[str],
+    ids: _IdAllocator,
+    *,
+    scratch: Path,
+    source_epsg: int | None = None,
+    keep_geojson: bool = False,
+) -> Iterator[str]:
+    """Stream ``layers`` of swissTLM3D ``src`` as OSM XML fragments.
+
+    Reprojects each layer to GeoJSONSeq with ``ogr2ogr`` (into ``scratch``) then
+    yields it through :func:`geojson_to_osm`, allocating ids from the shared
+    ``ids``. A layer missing from the source is warned and skipped (deliveries
+    vary) rather than failing the whole build. Per-layer GeoJSON is deleted after
+    use unless ``keep_geojson`` (these can be gigabytes for a whole-country
+    extent). Combine with :func:`topovert.osm.assemble_osm` to write the ``.osm``.
+    """
+    for layer in layers:
+        geojson = scratch / f"{layer}.geojsonl"
+        try:
+            gdal_tools._run(ogr_geojson_cmd(
+                src, layer, geojson, source_epsg=source_epsg,
+                where=LAYER_WHERE.get(layer),
+            ))
+        except TopovertError as exc:
+            log.warning("skipping swissTLM3D layer %r: %s", layer, exc)
+            continue
+        elements = 0
+        with geojson.open(encoding="utf-8") as gj:
+            for fragment in geojson_to_osm(gj, layer, ids):
+                yield fragment
+                elements += 1
+        log.info("layer %s -> %d OSM element(s)", layer, elements)
+        if not keep_geojson:
+            geojson.unlink(missing_ok=True)
+
+
 def build_features_osm(
     src: Path,
     layers: Iterable[str],
@@ -462,56 +499,18 @@ def build_features_osm(
 ) -> int:
     """Convert ``layers`` of swissTLM3D ``src`` into one combined ``dst`` ``.osm``.
 
-    Reprojects each layer to GeoJSONSeq with ``ogr2ogr`` then streams it through
-    :func:`geojson_to_osm`. A layer missing from the source is warned and skipped
-    (deliveries vary) rather than failing the whole build. Returns the number of
-    ``<node>`` elements written (the metric that decides whether to run splitter).
-    Per-layer GeoJSON is deleted after use unless ``keep_geojson`` (these can be
-    gigabytes for a whole-country extent).
+    Thin wrapper around :func:`iter_features_osm` + :func:`topovert.osm.assemble_osm`.
+    Returns the number of ``<node>`` elements written (the metric that decides
+    whether to run splitter).
     """
     if not src.exists():
         raise TopovertError(f"--tlm source not found: {src}")
-
     ids = _IdAllocator()
-    scratch = dst.parent
-    # splitter wants the OSM osmosis-ordered: all nodes (ascending id) then all
-    # ways. Stream nodes and ways to separate temp files, then concatenate.
-    nodes_path = scratch / (dst.name + ".nodes")
-    ways_path = scratch / (dst.name + ".ways")
-    nodes = 0
-    with nodes_path.open("w", encoding="utf-8") as nf, \
-            ways_path.open("w", encoding="utf-8") as wf:
-        for layer in layers:
-            geojson = scratch / f"{layer}.geojsonl"
-            try:
-                gdal_tools._run(ogr_geojson_cmd(
-                    src, layer, geojson, source_epsg=source_epsg,
-                    where=LAYER_WHERE.get(layer),
-                ))
-            except TopovertError as exc:
-                log.warning("skipping swissTLM3D layer %r: %s", layer, exc)
-                continue
-            elements = 0
-            with geojson.open(encoding="utf-8") as gj:
-                for fragment in geojson_to_osm(gj, layer, ids):
-                    if fragment.startswith("  <node"):
-                        nf.write(fragment)
-                        nodes += 1
-                    else:
-                        wf.write(fragment)
-                    elements += 1
-            log.info("layer %s -> %d OSM element(s)", layer, elements)
-            if not keep_geojson:
-                geojson.unlink(missing_ok=True)
-
-    with dst.open("w", encoding="utf-8") as fh:
-        fh.write(osm.OSM_HEADER)
-        fh.write(osm.bounds_element(bounds))
-        for part in (nodes_path, ways_path):
-            with part.open(encoding="utf-8") as pf:
-                shutil.copyfileobj(pf, fh)
-        fh.write(osm.OSM_FOOTER)
-    if not keep_geojson:
-        nodes_path.unlink(missing_ok=True)
-        ways_path.unlink(missing_ok=True)
-    return nodes
+    return osm.assemble_osm(
+        bounds, dst,
+        [iter_features_osm(
+            src, layers, ids, scratch=dst.parent,
+            source_epsg=source_epsg, keep_geojson=keep_geojson,
+        )],
+        keep_scratch=keep_geojson,
+    )

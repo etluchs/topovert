@@ -8,7 +8,7 @@ rule (so no mapped feature renders untyped).
 
 import re
 
-from topovert import mkgmap, vector
+from topovert import contour, mkgmap, vector
 
 
 def _style_rule_keys(filename: str) -> set[tuple[str, str]]:
@@ -28,12 +28,15 @@ def _style_rule_keys(filename: str) -> set[tuple[str, str]]:
 
 
 def _emitted_tag_dicts() -> list[dict]:
-    """Every tag dict vector.tags_for can return (the ferry special case too)."""
+    """Every tag dict the converters emit (vector.tags_for + contour, ferry too)."""
     dicts: list[dict] = [{"route": "ferry"}]
     for table, default, _names in vector._KIND_TABLES.values():
         for tags in list(table.values()) + [default]:
             if tags:
                 dicts.append(tags)
+    # Contour ways (contour.contour_tags) — a major (index) and a minor line.
+    dicts.append(contour.contour_tags(100, interval=20, major_every=5))
+    dicts.append(contour.contour_tags(120, interval=20, major_every=5))
     return dicts
 
 
