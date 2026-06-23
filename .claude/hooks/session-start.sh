@@ -40,3 +40,28 @@ if ! command -v bd >/dev/null 2>&1; then
   exit 1
 fi
 bd version >&2
+
+# Hydrate the local Dolt issue database from the committed JSONL export.
+#
+# The container is provisioned fresh, so the (gitignored) embedded Dolt DB
+# doesn't exist and `bd` commands fail with "no beads database found". The
+# configured Dolt remote (sync.remote in .beads/config.yaml) is a git+ssh
+# URL that isn't reachable from this sandbox, so we rebuild the DB locally
+# from .beads/issues.jsonl -- beads' off-machine recovery path. `--remote ""`
+# overrides the configured SSH remote for this init only (it does not touch
+# the tracked config.yaml). Idempotent: skipped once the DB exists (cached).
+if [ -f "$CLAUDE_PROJECT_DIR/.beads/issues.jsonl" ] && \
+   ! ( cd "$CLAUDE_PROJECT_DIR" && bd list >/dev/null 2>&1 ); then
+  echo "Hydrating beads database from issues.jsonl..." >&2
+  # --skip-agents/--skip-hooks keep init from re-running project integration
+  # (it would otherwise rewrite CLAUDE.md/AGENTS.md/settings.json and install
+  # git hooks on every fresh container). We only want the local DB + import.
+  if ( cd "$CLAUDE_PROJECT_DIR" && BD_NON_INTERACTIVE=1 \
+       bd init --from-jsonl --prefix topovert --remote "" \
+               --skip-agents --skip-hooks --non-interactive ) >&2; then
+    echo "Beads database hydrated." >&2
+  else
+    echo "Warning: beads DB hydration failed; rebuild manually with" \
+         "'bd init --from-jsonl --prefix topovert --remote \"\"'." >&2
+  fi
+fi

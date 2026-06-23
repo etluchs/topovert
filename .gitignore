@@ -30,3 +30,6 @@ sample/
 # Local sample/test datasets (large swissALTI3D downloads — not for VCS)
 testdata/
 *.zip
+
+# Beads / Dolt files (added by bd init)
+.beads/proxieddb/
