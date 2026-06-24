@@ -56,6 +56,7 @@ def build(
     tlm_layers: list[str] | None = None,
     contours: bool = False,
     contour_interval: int = contour.DEFAULT_INTERVAL,
+    hillshade: bool = True,
     max_nodes: int = splitter.DEFAULT_MAX_NODES,
     work_dir: Path | None = None,
     keep_intermediate: bool = False,
@@ -68,6 +69,9 @@ def build(
     splitter when the OSM is large -> mkgmap (``--dem`` when a DEM is present) ->
     copy result. ``contours`` adds elevation contour lines derived from the DEM
     (so it requires ``dem_dir``), spaced every ``contour_interval`` metres.
+    ``hillshade`` (default) embeds the DEM as a height grid for shaded relief;
+    set it ``False`` to skip the heavy DEM embed while still using the DEM for
+    bounds and ``--contours`` — a much smaller contour-only map.
     """
     if resolution not in DEM_RESOLUTIONS:
         raise TopovertError(
@@ -82,9 +86,16 @@ def build(
             "--contours needs a DEM (--dem-dir): contours are derived from the "
             "elevation data"
         )
+    if dem_dir is not None and not hillshade and not contours and tlm_path is None:
+        raise TopovertError(
+            "--no-hillshade with only --dem-dir leaves an empty map: add "
+            "--contours and/or --tlm, or drop --no-hillshade"
+        )
 
-    # Preflight: fail fast before touching the (slow) toolchain.
-    gdal_tools.check_available(need_hgt=dem_dir is not None, need_contour=contours)
+    # Preflight: fail fast before touching the (slow) toolchain. The SRTMHGT
+    # driver is only needed to write HGT tiles, i.e. when actually hillshading.
+    embed_dem = dem_dir is not None and hillshade
+    gdal_tools.check_available(need_hgt=embed_dem, need_contour=contours)
     java = jars.find_java()
     tifs = _find_geotiffs(dem_dir) if dem_dir is not None else []
     layers = tlm_layers or list(vector.DEFAULT_TLM_LAYERS)
@@ -108,20 +119,26 @@ def build(
         tiles = []
         hgt_dir: Path | None = None
         if dem_dir is not None:
+            # The mosaic is always built — it gives the bounds and feeds
+            # gdal_contour — but the HGT tiles + --dem embed only happen when
+            # hillshading (the heavy part: a contour-only map skips them).
             vrt = gdal_tools.build_vrt(tifs, workdir / "mosaic.vrt")
             bounds = gdal_tools.wgs84_bounds(vrt)
             log.info("DEM covers WGS84 bounds %s", tuple(round(b, 5) for b in bounds))
-            min_lon, min_lat, max_lon, max_lat = bounds
-            m = DEM_TILE_MARGIN_DEG
-            tiles = tiles_for_bounds(min_lon - m, min_lat - m, max_lon + m, max_lat + m)
-            log.info("generating %d HGT tile(s): %s", len(tiles), [t.name for t in tiles])
-            hgt_dir = workdir / "hgt"
-            hgt_dir.mkdir()
-            for tile in tiles:
-                gdal_tools.make_hgt_tile(
-                    vrt, tile, samples, hgt_dir,
-                    source_epsg=source_epsg, resampling=resampling,
-                )
+            if embed_dem:
+                min_lon, min_lat, max_lon, max_lat = bounds
+                m = DEM_TILE_MARGIN_DEG
+                tiles = tiles_for_bounds(min_lon - m, min_lat - m, max_lon + m, max_lat + m)
+                log.info("generating %d HGT tile(s): %s", len(tiles), [t.name for t in tiles])
+                hgt_dir = workdir / "hgt"
+                hgt_dir.mkdir()
+                for tile in tiles:
+                    gdal_tools.make_hgt_tile(
+                        vrt, tile, samples, hgt_dir,
+                        source_epsg=source_epsg, resampling=resampling,
+                    )
+            else:
+                log.info("skipping hillshade DEM embed (--no-hillshade)")
         else:
             bounds = vector.tlm_bounds(tlm_path, layers, source_epsg=source_epsg)
             log.info("swissTLM3D covers WGS84 bounds %s", tuple(round(b, 5) for b in bounds))

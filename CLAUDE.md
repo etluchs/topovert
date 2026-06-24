@@ -53,8 +53,10 @@ Pipeline (`src/topovert/pipeline.py:build`): bounds come from the DEM mosaic (`g
 per-1°-tile `gdalwarp` (2056→4326, SRTM1/3 grid) + `gdal_translate -of SRTMHGT`. Vector path:
 `ogr2ogr` → GeoJSON → `.osm`. Contour path (`--contours`): `gdal_contour` (DEM mosaic VRT → GPKG)
 → `ogr2ogr` reproject → GeoJSON → `.osm`. The vector and contour feeds share one id allocator and
-`osm.assemble_osm` merges their fragment streams into one osmosis-ordered `.osm`. Then (splitter if
-large →) `mkgmap --gmapsupp [--dem]` → single loadable `gmapsupp.img`. Modules: `hgt.py` (SRTM
+`osm.assemble_osm` merges their fragment streams into one osmosis-ordered `.osm`. The DEM mosaic is
+always built (bounds + contours), but the HGT tiles + `--dem` embed only happen when hillshading;
+`--no-hillshade` skips them (and the SRTMHGT driver requirement) for a small contour-only map. Then
+(splitter if large →) `mkgmap --gmapsupp [--dem]` → single loadable `gmapsupp.img`. Modules: `hgt.py` (SRTM
 tiling geometry — unit-tested), `gdal_tools.py` (GDAL argv builders + exec), `osm.py` (OSM XML
 writer + node/way serializers + `assemble_osm`), `vector.py` (swissTLM3D → GeoJSON → OSM, data-only
 `TAG_MAP`, bounds), `contour.py` (DEM → `gdal_contour` → OSM contour ways), `jars.py` (Java +
@@ -74,6 +76,7 @@ uv run topovert build --dem-dir ./tiles --out ./out/swiss.img   # hillshade-only
 uv run topovert build --tlm ./SWISSTLM3D.gdb --out ./out/ch.img # vector-only (no DEM; splitter as needed)
 uv run topovert build --dem-dir ./tiles --tlm ./tlm.gdb --out ./out/swiss.img   # both
 uv run topovert build --dem-dir ./tiles --contours --out ./out/swiss.img        # + contour lines
+uv run topovert build --dem-dir ./tiles --contours --no-hillshade --out ./out/c.img  # contour-only (no DEM embed)
 uv run topovert -v build ... --keep-intermediate                # debug: verbose + keep workdir
 ```
 

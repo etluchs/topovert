@@ -27,7 +27,9 @@ v1 turns freely available Swisstopo data into a Garmin `.IMG`. It is a thin Pyth
 - Either input is optional: `--tlm` alone makes a **vector-only** map, `--dem-dir` alone a
   hillshade-only map. Large extents (up to whole-country) are tiled with **splitter** automatically.
 - **Elevation contour lines** derived from the DEM (`--contours`), spaced every `--contour-interval`
-  metres (default 20 m) with every 5th drawn as a bold index line.
+  metres (default 20 m) with every 5th drawn as a bold index line. `--no-hillshade` skips embedding
+  the (large) DEM for shaded relief, so `--contours --no-hillshade` yields a lightweight
+  contour-only map.
 - A bundled **Swiss topographic style + TYP** colours the output (forest, rock, glacier and water
   fills; red paths; brown contours; Swiss-tuned road/rail rendering) so the map is legible on-device
   out of the box.
@@ -57,11 +59,14 @@ uv run topovert build --tlm ./SWISSTLM3D_CHLV95LN02.gdb --out ./out/swiss.img
 
 # Add elevation contour lines from the DEM (20 m spacing by default)
 uv run topovert build --dem-dir ./swissalti3d_tiles --contours --out ./out/swiss.img
+
+# Lightweight contour-only map: derive contours but skip the heavy hillshade DEM
+uv run topovert build --dem-dir ./swissalti3d_tiles --contours --no-hillshade --out ./out/swiss.img
 ```
 
 Then copy the `.IMG` to your Garmin device (or load it in BaseCamp) to see the shaded relief.
 Run `topovert build --help` for options (resolution, resampling, source EPSG, `--tlm`/`--tlm-layer`,
-`--contours`/`--contour-interval`).
+`--contours`/`--contour-interval`, `--no-hillshade`).
 
 ## Choosing a DEM source
 

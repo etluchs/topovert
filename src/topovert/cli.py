@@ -73,6 +73,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="contour spacing in metres (default: %(default)s)",
     )
     b.add_argument(
+        "--no-hillshade", dest="no_hillshade", action="store_true",
+        help="don't embed the DEM for shaded relief (much smaller .IMG); the DEM "
+             "is still used for bounds and --contours. Pair with --contours for a "
+             "lightweight contour-only map",
+    )
+    b.add_argument(
         "--max-nodes", type=int, default=None,
         help="splitter tile size in OSM nodes for large extents (default: "
              "splitter's own ~1.6M); only used when the map needs tiling",
@@ -102,12 +108,20 @@ def _cmd_build(args: argparse.Namespace) -> int:
         tlm_layers=args.tlm_layers,
         contours=args.contours,
         contour_interval=args.contour_interval,
+        hillshade=not args.no_hillshade,
         **({"max_nodes": args.max_nodes} if args.max_nodes else {}),
         work_dir=args.work_dir,
         keep_intermediate=args.keep_intermediate,
     )
-    dem = f"{len(result.tiles)} DEM tile(s)" if result.tiles else "no DEM"
-    print(f"Wrote {result.out_path} ({dem}).")
+    feats = []
+    if result.tiles:
+        feats.append(f"hillshade, {len(result.tiles)} DEM tile(s)")
+    if args.contours:
+        feats.append("contours")
+    if args.tlm:
+        feats.append("vector features")
+    summary = "; ".join(feats) if feats else "bounds only"
+    print(f"Wrote {result.out_path} ({summary}).")
     return 0
 
 
