@@ -48,7 +48,7 @@ def build_img_cmd(
 
     ``--gmapsupp`` makes the loadable single-file product. ``hgt_dir`` adds
     ``--dem`` for hillshading (omit for a vector-only map). ``osm_inputs`` is one
-    ``.osm`` (single tile) or many ``.osm.pbf`` (splitter tiles); for the latter
+    ``.osm`` (single tile) or many ``.osm.o5m`` (splitter tiles); for the latter
     pass ``mapname=None`` so mkgmap takes each tile's number from its filename.
     ``style_dir`` / ``typ_file`` apply the bundled Swiss rendering; pass ``None``
     to fall back to mkgmap's default style/appearance.
@@ -69,7 +69,7 @@ def build_img_cmd(
     if hgt_dir is not None:
         cmd.append("--dem=" + str(hgt_dir))
     cmd += [str(p) for p in osm_inputs]
-    # The TYP must follow the .osm/.pbf inputs so mkgmap binds it to this map.
+    # The TYP must follow the .osm/.o5m inputs so mkgmap binds it to this map.
     if typ_file is not None:
         cmd.append(str(typ_file))
     return cmd

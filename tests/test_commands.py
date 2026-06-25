@@ -82,23 +82,24 @@ def test_build_img_cmd_vector_only_has_no_dem():
 
 
 def test_build_img_cmd_split_tiles_drop_mapname():
-    inputs = [Path("63240001.osm.pbf"), Path("63240002.osm.pbf")]
+    inputs = [Path("63240001.osm.o5m"), Path("63240002.osm.o5m")]
     cmd = mkgmap.build_img_cmd(
         "java", Path("mkgmap.jar"), inputs, Path("out"),
         map_name="swiss", mapname=None,  # tiles carry their own numbers
     )
     assert not any(a.startswith("--mapname=") for a in cmd)
     # tiles precede the TYP, which mkgmap binds last
-    assert cmd[-3:] == ["63240001.osm.pbf", "63240002.osm.pbf", str(mkgmap.TYP_FILE)]
+    assert cmd[-3:] == ["63240001.osm.o5m", "63240002.osm.o5m", str(mkgmap.TYP_FILE)]
 
 
-def test_split_cmd_outputs_pbf_tiles():
+def test_split_cmd_outputs_o5m_tiles():
     cmd = splitter.split_cmd(
         "java", Path("splitter.jar"), Path("features.osm"), Path("split"),
         max_nodes=1_600_000, mapid="63240001",
     )
     assert cmd[:3] == ["java", "-jar", "splitter.jar"]
-    assert "--output=pbf" in cmd
+    # o5m, not pbf: dense contour ways overflow PBF's per-block entity cap.
+    assert "--output=o5m" in cmd
     assert "--output-dir=split" in cmd
     assert "--max-nodes=1600000" in cmd
     assert "--mapid=63240001" in cmd

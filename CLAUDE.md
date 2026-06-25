@@ -120,6 +120,12 @@ sources with `TOPOVERT_MKGMAP_URL` / `TOPOVERT_SPLITTER_URL`.
   it dies with "Node ids are not sorted". `vector._IdAllocator` counts up (positive ids, separate
   node/way counters) and `build_features_osm` streams nodes and ways to separate temp files then
   concatenates (nodes block, then ways). splitter is auto-downloaded + SHA-pinned like mkgmap.
+- **splitter must emit `--output=o5m`, not pbf**: PBF packs entities into fixed fileblocks with a
+  per-block entity/size cap. Dense `--contours` data (very long ways with huge node arrays — e.g.
+  whole-Switzerland 20 m contours, ~124 M nodes) overflows a block and splitter aborts with
+  `java.lang.Error: This file has too many entities in a block. Parsers will reject it.` o5m is a
+  flat streaming format with no block limit and mkgmap reads it natively (`splitter.py` globs
+  `*.o5m`). A single small tile happens to fit a PBF block, so this only bites at large extents.
 - **Filled water areas come from `TLM_BODENBEDECKUNG` polygons** (`OBJEKTART IN (5,10)` = river surface
   + lake), *not* `TLM_STEHENDES_GEWAESSER`, whose features are unclosed shoreline **lines** that can't
   fill as area. `vector.LAYER_WHERE` filters land cover to water at export time.
