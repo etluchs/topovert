@@ -13,7 +13,9 @@ roads/paths, railways, aerialways, watercourses, land cover (water/forest/rock/g
 buildings, POIs, and walls. `--contours` adds elevation contour lines derived from the DEM.
 Either input is optional: `--tlm` alone makes a **vector-only** map (no DEM), `--dem-dir` alone a
 hillshade-only map. Large extents (up to whole-country) are tiled with **splitter** automatically.
-Area auto-download is deferred (`bd list`).
+`--dem-area <name|bbox>` (e.g. `switzerland`) auto-downloads the covering **Copernicus GLO-30**
+(~30 m) DEM tiles in place of `--dem-dir`. Full swissTLM3D/swissALTI3D STAC area selection is still
+deferred (`bd show topovert-y8s`).
 
 ## Keep the docs in sync
 
@@ -49,7 +51,9 @@ geospatial/encoding code itself:
   when the OSM exceeds `pipeline.SPLIT_NODE_THRESHOLD` nodes.
 
 Pipeline (`src/topovert/pipeline.py:build`): bounds come from the DEM mosaic (`gdalbuildvrt` →
-`gdalinfo wgs84Extent`) or, with no DEM, from the swissTLM3D extent (`vector.tlm_bounds`). DEM path:
+`gdalinfo wgs84Extent`) or, with no DEM, from the swissTLM3D extent (`vector.tlm_bounds`). With
+`--dem-area`, `dem_download.download_area` fetches the covering Copernicus GLO-30 GeoTIFFs into the
+cache first and the build proceeds as if that were `--dem-dir`. DEM path:
 per-1°-tile `gdalwarp` (2056→4326, SRTM1/3 grid) + `gdal_translate -of SRTMHGT`. Vector path:
 `ogr2ogr` → GeoJSON → `.osm`. Contour path (`--contours`): `gdal_contour` (DEM mosaic VRT → GPKG)
 → `ogr2ogr` reproject → GeoJSON → `.osm`. The vector and contour feeds share one id allocator and
@@ -59,7 +63,8 @@ always built (bounds + contours), but the HGT tiles + `--dem` embed only happen 
 (splitter if large →) `mkgmap --gmapsupp [--dem]` → single loadable `gmapsupp.img`. Modules: `hgt.py` (SRTM
 tiling geometry — unit-tested), `gdal_tools.py` (GDAL argv builders + exec), `osm.py` (OSM XML
 writer + node/way serializers + `assemble_osm`), `vector.py` (swissTLM3D → GeoJSON → OSM, data-only
-`TAG_MAP`, bounds), `contour.py` (DEM → `gdal_contour` → OSM contour ways), `jars.py` (Java +
+`TAG_MAP`, bounds), `contour.py` (DEM → `gdal_contour` → OSM contour ways), `dem_download.py`
+(`--dem-area` → Copernicus GLO-30 tile download-cache), `jars.py` (Java +
 mkgmap/splitter download-cache), `splitter.py`, `mkgmap.py` (the `.IMG` build), `cli.py`. The bundled mkgmap
 **style + TYP** live under `src/topovert/styles/` (`topovert/` rule files + `topovert_typ.txt`);
 `mkgmap.py` always applies them via `--style-file` + the TYP input.
@@ -77,6 +82,7 @@ uv run topovert build --tlm ./SWISSTLM3D.gdb --out ./out/ch.img # vector-only (n
 uv run topovert build --dem-dir ./tiles --tlm ./tlm.gdb --out ./out/swiss.img   # both
 uv run topovert build --dem-dir ./tiles --contours --out ./out/swiss.img        # + contour lines
 uv run topovert build --dem-dir ./tiles --contours --no-hillshade --out ./out/c.img  # contour-only (no DEM embed)
+uv run topovert build --dem-area switzerland --contours --no-hillshade --out ./out/ch.img  # auto-download DEM, contour-only
 uv run topovert -v build ... --keep-intermediate                # debug: verbose + keep workdir
 ```
 

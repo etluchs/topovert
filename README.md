@@ -33,8 +33,11 @@ v1 turns freely available Swisstopo data into a Garmin `.IMG`. It is a thin Pyth
 - A bundled **Swiss topographic style + TYP** colours the output (forest, rock, glacier and water
   fills; red paths; brown contours; Swiss-tuned road/rail rendering) so the map is legible on-device
   out of the box.
+- **Auto-download the DEM for an area** (`--dem-area`): instead of supplying local tiles, name an
+  area (`switzerland`) or a WGS84 bbox and topovert fetches the covering **Copernicus GLO-30**
+  (~30 m) GeoTIFF tiles into a cache and builds from them. All of Switzerland is 18 tiles (~730 MB).
 
-Automatic area download is planned next.
+Full **swissTLM3D / swissALTI3D STAC** area selection is the planned next step.
 
 ## Requirements
 
@@ -62,6 +65,10 @@ uv run topovert build --dem-dir ./swissalti3d_tiles --contours --out ./out/swiss
 
 # Lightweight contour-only map: derive contours but skip the heavy hillshade DEM
 uv run topovert build --dem-dir ./swissalti3d_tiles --contours --no-hillshade --out ./out/swiss.img
+
+# No local tiles? Auto-download the DEM for an area (Copernicus GLO-30) and build
+# a whole-Switzerland contour-only map (no shading) — ideal for a Garmin Fenix:
+uv run topovert build --dem-area switzerland --contours --no-hillshade --out ./out/swiss-contours.img
 ```
 
 Then copy the `.IMG` to your Garmin device (or load it in BaseCamp) to see the shaded relief.
@@ -78,6 +85,8 @@ high-detail extent, start from a source that is *already* near the target resolu
 - **Copernicus DEM GLO-30** (~30 m) — free, global, ships as GeoTIFF in **EPSG:4326**. All of
   Switzerland is 18 one-degree tiles (~730 MB) from the [AWS Open Data mirror](https://registry.opendata.aws/copernicus-dem/),
   e.g. `https://copernicus-dem-30m.s3.amazonaws.com/Copernicus_DSM_COG_10_N47_00_E007_00_DEM/Copernicus_DSM_COG_10_N47_00_E007_00_DEM.tif`.
+  **`--dem-area` fetches these for you** (cached in `~/.cache/topovert/copernicus-dem-30m/`), so you
+  never have to download them by hand — pass `--dem-area switzerland` (or a bbox) instead of `--dem-dir`.
 - **swissALTI3D at 2 m** — same EPSG:2056 as the 0.5 m product (no flag change), ~16× smaller.
 
 The tiles' EPSG:4326 CRS is read straight from the files — no `--source-epsg` needed:
@@ -85,6 +94,9 @@ The tiles' EPSG:4326 CRS is read straight from the files — no `--source-epsg` 
 ```bash
 # Whole-Switzerland hillshade from Copernicus GLO-30 tiles (EPSG:4326)
 uv run topovert build --dem-dir ./glo30_tiles --out ./out/swiss-glo30.img
+
+# ...or let topovert download those same tiles for you:
+uv run topovert build --dem-area switzerland --out ./out/swiss-glo30.img
 ```
 
 This builds a ~90 MB country-wide `gmapsupp.img` in under a minute on a laptop. Use
