@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import TopovertError
-from . import contour, gdal_tools, jars, mkgmap, osm, splitter, vector
+from . import contour, dem_download, gdal_tools, jars, mkgmap, osm, splitter, vector
 from .hgt import DEFAULT_RESOLUTION, DEM_RESOLUTIONS, tiles_for_bounds
 
 log = logging.getLogger(__name__)
@@ -48,6 +48,7 @@ def build(
     dem_dir: Path | None,
     out_path: Path,
     *,
+    dem_area: str | None = None,
     resolution: str = DEFAULT_RESOLUTION,
     resampling: str = "bilinear",
     source_epsg: int | None = None,
@@ -63,7 +64,10 @@ def build(
 ) -> BuildResult:
     """Build a Garmin ``.IMG`` from a DEM and/or swissTLM3D vectors.
 
-    At least one of ``dem_dir`` / ``tlm_path`` is required. Steps: preflight ->
+    The DEM source is either a local ``dem_dir`` of GeoTIFFs or ``dem_area`` (a
+    named area or WGS84 bbox) whose Copernicus GLO-30 tiles are auto-downloaded
+    into a cache and used in its place — pass at most one. At least one of a DEM
+    source / ``tlm_path`` is required. Steps: preflight ->
     bounds (from the DEM mosaic, else from the TLM extent) -> optional per-tile
     HGT -> OSM (bounds-only, swissTLM3D vector features, and/or DEM contours) ->
     splitter when the OSM is large -> mkgmap (``--dem`` when a DEM is present) ->
@@ -79,24 +83,38 @@ def build(
         )
     samples = DEM_RESOLUTIONS[resolution]
 
-    if dem_dir is None and tlm_path is None:
-        raise TopovertError("nothing to build: pass --dem-dir and/or --tlm")
-    if contours and dem_dir is None:
+    if dem_dir is not None and dem_area is not None:
         raise TopovertError(
-            "--contours needs a DEM (--dem-dir): contours are derived from the "
-            "elevation data"
+            "pass either --dem-dir (local tiles) or --dem-area (auto-download), "
+            "not both"
         )
-    if dem_dir is not None and not hillshade and not contours and tlm_path is None:
+    have_dem = dem_dir is not None or dem_area is not None
+    if not have_dem and tlm_path is None:
+        raise TopovertError("nothing to build: pass --dem-dir, --dem-area and/or --tlm")
+    if contours and not have_dem:
         raise TopovertError(
-            "--no-hillshade with only --dem-dir leaves an empty map: add "
-            "--contours and/or --tlm, or drop --no-hillshade"
+            "--contours needs a DEM (--dem-dir or --dem-area): contours are "
+            "derived from the elevation data"
         )
+    if have_dem and not hillshade and not contours and tlm_path is None:
+        raise TopovertError(
+            "--no-hillshade with only a DEM leaves an empty map: add --contours "
+            "and/or --tlm, or drop --no-hillshade"
+        )
+    # Validate the area now (cheap) so a typo fails before the slow download.
+    if dem_area is not None:
+        dem_download.parse_area(dem_area)
 
-    # Preflight: fail fast before touching the (slow) toolchain. The SRTMHGT
-    # driver is only needed to write HGT tiles, i.e. when actually hillshading.
-    embed_dem = dem_dir is not None and hillshade
+    # Preflight: fail fast before touching the (slow) toolchain or the DEM
+    # download. The SRTMHGT driver is only needed to write HGT tiles, i.e. when
+    # actually hillshading.
+    embed_dem = have_dem and hillshade
     gdal_tools.check_available(need_hgt=embed_dem, need_contour=contours)
     java = jars.find_java()
+    # Resolve --dem-area to a local directory of GeoTIFFs (cached across runs).
+    if dem_area is not None:
+        log.info("auto-downloading Copernicus GLO-30 DEM for area %r", dem_area)
+        dem_dir = dem_download.download_area(dem_area)
     tifs = _find_geotiffs(dem_dir) if dem_dir is not None else []
     layers = tlm_layers or list(vector.DEFAULT_TLM_LAYERS)
     if tlm_path is not None:

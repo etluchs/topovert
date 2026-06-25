@@ -30,7 +30,14 @@ def _build_parser() -> argparse.ArgumentParser:
     b.add_argument(
         "--dem-dir", type=Path, default=None,
         help="directory of swissALTI3D GeoTIFF tiles (EPSG:2056) for hillshading; "
-             "optional if --tlm is given",
+             "optional if --tlm or --dem-area is given",
+    )
+    b.add_argument(
+        "--dem-area", default=None, metavar="AREA",
+        help="auto-download the DEM for an area instead of --dem-dir: a named "
+             "area ('switzerland') or a 'min_lon,min_lat,max_lon,max_lat' WGS84 "
+             "bbox. Fetches Copernicus GLO-30 (~30 m) tiles into a cache. Mutually "
+             "exclusive with --dem-dir",
     )
     b.add_argument(
         "--out", type=Path, required=True, help="output .IMG path",
@@ -100,6 +107,7 @@ def _cmd_build(args: argparse.Namespace) -> int:
     result = build(
         args.dem_dir,
         args.out,
+        dem_area=args.dem_area,
         resolution=args.dem_resolution,
         resampling=args.resampling,
         source_epsg=args.source_epsg,
