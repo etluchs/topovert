@@ -162,3 +162,22 @@ Xpm="0 0 1 0"
 LineWidth=1
 BorderWidth=0
 [end]
+
+; Contours: brown, index lines (0x22) bolder than intermediate ones (0x21).
+[_line]
+Type=0x21
+String1=0x04,Hoehenlinie
+Xpm="0 0 1 0"
+"1 c #B08050"
+LineWidth=1
+BorderWidth=0
+[end]
+
+[_line]
+Type=0x22
+String1=0x04,Hoehenlinie Index
+Xpm="0 0 1 0"
+"1 c #906030"
+LineWidth=2
+BorderWidth=0
+[end]

@@ -38,13 +38,15 @@ def _run(cmd: list[str]) -> subprocess.CompletedProcess[str]:
     return proc
 
 
-def check_available(*, need_hgt: bool = True) -> None:
+def check_available(*, need_hgt: bool = True, need_contour: bool = False) -> None:
     """Raise if any required GDAL CLI tool is missing.
 
     ``need_hgt`` additionally requires the SRTMHGT driver (only the DEM path needs
-    it; a vector-only ``--tlm`` build does not).
+    it; a vector-only ``--tlm`` build does not). ``need_contour`` requires the
+    ``gdal_contour`` tool (only the ``--contours`` path needs it).
     """
-    missing = [t for t in REQUIRED_TOOLS if shutil.which(t) is None]
+    required = REQUIRED_TOOLS + (("gdal_contour",) if need_contour else ())
+    missing = [t for t in required if shutil.which(t) is None]
     if missing:
         raise TopovertError(
             "GDAL command-line tools not found on PATH: "

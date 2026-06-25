@@ -10,9 +10,10 @@ data into `.IMG` files installable on Garmin navigation devices.
 **v1 (current) is one vertical slice:** a local directory of swissALTI3D GeoTIFF elevation tiles
 (EPSG:2056 / LV95) → a hill-shaded Garmin `.IMG`. `--tlm <swissTLM3D>` overlays vector features —
 roads/paths, railways, aerialways, watercourses, land cover (water/forest/rock/glacier/wetland),
-buildings, POIs, and walls. Either input is optional: `--tlm` alone makes a **vector-only** map
-(no DEM), `--dem-dir` alone a hillshade-only map. Large extents (up to whole-country) are tiled
-with **splitter** automatically. Contour lines and area auto-download are deferred (`bd list`).
+buildings, POIs, and walls. `--contours` adds elevation contour lines derived from the DEM.
+Either input is optional: `--tlm` alone makes a **vector-only** map (no DEM), `--dem-dir` alone a
+hillshade-only map. Large extents (up to whole-country) are tiled with **splitter** automatically.
+Area auto-download is deferred (`bd list`).
 
 ## Keep the docs in sync
 
@@ -37,11 +38,12 @@ Python pin matches `pyproject`, swissTLM3D is a `.gdb`); extend it when you add 
 zero runtime pip deps) that shells out to two mature external toolchains and writes almost no
 geospatial/encoding code itself:
 
-- **GDAL command-line tools** (`gdalbuildvrt`, `gdalwarp`, `gdal_translate`, `gdalinfo`, `ogr2ogr`) —
-  reprojection, raster conversion, and vector export. We use the **CLI, not the `osgeo.gdal`
-  bindings** (far easier cross-platform install, version-tolerant). This is also why the vector path
-  uses `ogr2ogr → GeoJSON → our own OSM writer` rather than `ogr2pbf` (which needs the `osgeo`
-  bindings) — see `bd show topovert-rn1`.
+- **GDAL command-line tools** (`gdalbuildvrt`, `gdalwarp`, `gdal_translate`, `gdalinfo`, `ogr2ogr`,
+  and `gdal_contour` for `--contours`) — reprojection, raster conversion, vector export, and contour
+  extraction. We use the **CLI, not the `osgeo.gdal` bindings** (far easier cross-platform install,
+  version-tolerant). This is also why the vector path uses `ogr2ogr → GeoJSON → our own OSM writer`
+  rather than `ogr2pbf`, and contours use `gdal_contour` rather than `pyhgtmap` (both alternatives
+  need the `osgeo` bindings + pip deps) — see `bd show topovert-rn1` / `topovert-783`.
 - **mkgmap** (Java) — does all Garmin `.IMG` encoding, including embedding the DEM for hillshading.
 - **splitter** (Java, same source) — tiles a large `.osm` into mkgmap-sized pieces; used automatically
   when the OSM exceeds `pipeline.SPLIT_NODE_THRESHOLD` nodes.
@@ -49,11 +51,16 @@ geospatial/encoding code itself:
 Pipeline (`src/topovert/pipeline.py:build`): bounds come from the DEM mosaic (`gdalbuildvrt` →
 `gdalinfo wgs84Extent`) or, with no DEM, from the swissTLM3D extent (`vector.tlm_bounds`). DEM path:
 per-1°-tile `gdalwarp` (2056→4326, SRTM1/3 grid) + `gdal_translate -of SRTMHGT`. Vector path:
-`ogr2ogr` → GeoJSON → `.osm`. Then (splitter if large →) `mkgmap --gmapsupp [--dem]` → single
-loadable `gmapsupp.img`. Modules: `hgt.py` (SRTM tiling geometry — unit-tested), `gdal_tools.py`
-(GDAL argv builders + exec), `osm.py` (OSM XML writer + node/way serializers), `vector.py`
-(swissTLM3D → GeoJSON → OSM, data-only `TAG_MAP`, bounds), `jars.py` (Java + mkgmap/splitter
-download-cache), `splitter.py`, `mkgmap.py` (the `.IMG` build), `cli.py`. The bundled mkgmap
+`ogr2ogr` → GeoJSON → `.osm`. Contour path (`--contours`): `gdal_contour` (DEM mosaic VRT → GPKG)
+→ `ogr2ogr` reproject → GeoJSON → `.osm`. The vector and contour feeds share one id allocator and
+`osm.assemble_osm` merges their fragment streams into one osmosis-ordered `.osm`. The DEM mosaic is
+always built (bounds + contours), but the HGT tiles + `--dem` embed only happen when hillshading;
+`--no-hillshade` skips them (and the SRTMHGT driver requirement) for a small contour-only map. Then
+(splitter if large →) `mkgmap --gmapsupp [--dem]` → single loadable `gmapsupp.img`. Modules: `hgt.py` (SRTM
+tiling geometry — unit-tested), `gdal_tools.py` (GDAL argv builders + exec), `osm.py` (OSM XML
+writer + node/way serializers + `assemble_osm`), `vector.py` (swissTLM3D → GeoJSON → OSM, data-only
+`TAG_MAP`, bounds), `contour.py` (DEM → `gdal_contour` → OSM contour ways), `jars.py` (Java +
+mkgmap/splitter download-cache), `splitter.py`, `mkgmap.py` (the `.IMG` build), `cli.py`. The bundled mkgmap
 **style + TYP** live under `src/topovert/styles/` (`topovert/` rule files + `topovert_typ.txt`);
 `mkgmap.py` always applies them via `--style-file` + the TYP input.
 
@@ -68,6 +75,8 @@ uv run pytest tests/test_hgt.py -q        # one test file
 uv run topovert build --dem-dir ./tiles --out ./out/swiss.img   # hillshade-only
 uv run topovert build --tlm ./SWISSTLM3D.gdb --out ./out/ch.img # vector-only (no DEM; splitter as needed)
 uv run topovert build --dem-dir ./tiles --tlm ./tlm.gdb --out ./out/swiss.img   # both
+uv run topovert build --dem-dir ./tiles --contours --out ./out/swiss.img        # + contour lines
+uv run topovert build --dem-dir ./tiles --contours --no-hillshade --out ./out/c.img  # contour-only (no DEM embed)
 uv run topovert -v build ... --keep-intermediate                # debug: verbose + keep workdir
 ```
 

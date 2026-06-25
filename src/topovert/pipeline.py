@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import TopovertError
-from . import gdal_tools, jars, mkgmap, osm, splitter, vector
+from . import contour, gdal_tools, jars, mkgmap, osm, splitter, vector
 from .hgt import DEFAULT_RESOLUTION, DEM_RESOLUTIONS, tiles_for_bounds
 
 log = logging.getLogger(__name__)
@@ -54,6 +54,9 @@ def build(
     map_name: str = "topovert",
     tlm_path: Path | None = None,
     tlm_layers: list[str] | None = None,
+    contours: bool = False,
+    contour_interval: int = contour.DEFAULT_INTERVAL,
+    hillshade: bool = True,
     max_nodes: int = splitter.DEFAULT_MAX_NODES,
     work_dir: Path | None = None,
     keep_intermediate: bool = False,
@@ -62,8 +65,13 @@ def build(
 
     At least one of ``dem_dir`` / ``tlm_path`` is required. Steps: preflight ->
     bounds (from the DEM mosaic, else from the TLM extent) -> optional per-tile
-    HGT -> OSM (bounds-only, or swissTLM3D vector features) -> splitter when the
-    OSM is large -> mkgmap (``--dem`` when a DEM is present) -> copy result.
+    HGT -> OSM (bounds-only, swissTLM3D vector features, and/or DEM contours) ->
+    splitter when the OSM is large -> mkgmap (``--dem`` when a DEM is present) ->
+    copy result. ``contours`` adds elevation contour lines derived from the DEM
+    (so it requires ``dem_dir``), spaced every ``contour_interval`` metres.
+    ``hillshade`` (default) embeds the DEM as a height grid for shaded relief;
+    set it ``False`` to skip the heavy DEM embed while still using the DEM for
+    bounds and ``--contours`` — a much smaller contour-only map.
     """
     if resolution not in DEM_RESOLUTIONS:
         raise TopovertError(
@@ -73,9 +81,21 @@ def build(
 
     if dem_dir is None and tlm_path is None:
         raise TopovertError("nothing to build: pass --dem-dir and/or --tlm")
+    if contours and dem_dir is None:
+        raise TopovertError(
+            "--contours needs a DEM (--dem-dir): contours are derived from the "
+            "elevation data"
+        )
+    if dem_dir is not None and not hillshade and not contours and tlm_path is None:
+        raise TopovertError(
+            "--no-hillshade with only --dem-dir leaves an empty map: add "
+            "--contours and/or --tlm, or drop --no-hillshade"
+        )
 
-    # Preflight: fail fast before touching the (slow) toolchain.
-    gdal_tools.check_available(need_hgt=dem_dir is not None)
+    # Preflight: fail fast before touching the (slow) toolchain. The SRTMHGT
+    # driver is only needed to write HGT tiles, i.e. when actually hillshading.
+    embed_dem = dem_dir is not None and hillshade
+    gdal_tools.check_available(need_hgt=embed_dem, need_contour=contours)
     java = jars.find_java()
     tifs = _find_geotiffs(dem_dir) if dem_dir is not None else []
     layers = tlm_layers or list(vector.DEFAULT_TLM_LAYERS)
@@ -99,31 +119,51 @@ def build(
         tiles = []
         hgt_dir: Path | None = None
         if dem_dir is not None:
+            # The mosaic is always built — it gives the bounds and feeds
+            # gdal_contour — but the HGT tiles + --dem embed only happen when
+            # hillshading (the heavy part: a contour-only map skips them).
             vrt = gdal_tools.build_vrt(tifs, workdir / "mosaic.vrt")
             bounds = gdal_tools.wgs84_bounds(vrt)
             log.info("DEM covers WGS84 bounds %s", tuple(round(b, 5) for b in bounds))
-            min_lon, min_lat, max_lon, max_lat = bounds
-            m = DEM_TILE_MARGIN_DEG
-            tiles = tiles_for_bounds(min_lon - m, min_lat - m, max_lon + m, max_lat + m)
-            log.info("generating %d HGT tile(s): %s", len(tiles), [t.name for t in tiles])
-            hgt_dir = workdir / "hgt"
-            hgt_dir.mkdir()
-            for tile in tiles:
-                gdal_tools.make_hgt_tile(
-                    vrt, tile, samples, hgt_dir,
-                    source_epsg=source_epsg, resampling=resampling,
-                )
+            if embed_dem:
+                min_lon, min_lat, max_lon, max_lat = bounds
+                m = DEM_TILE_MARGIN_DEG
+                tiles = tiles_for_bounds(min_lon - m, min_lat - m, max_lon + m, max_lat + m)
+                log.info("generating %d HGT tile(s): %s", len(tiles), [t.name for t in tiles])
+                hgt_dir = workdir / "hgt"
+                hgt_dir.mkdir()
+                for tile in tiles:
+                    gdal_tools.make_hgt_tile(
+                        vrt, tile, samples, hgt_dir,
+                        source_epsg=source_epsg, resampling=resampling,
+                    )
+            else:
+                log.info("skipping hillshade DEM embed (--no-hillshade)")
         else:
             bounds = vector.tlm_bounds(tlm_path, layers, source_epsg=source_epsg)
             log.info("swissTLM3D covers WGS84 bounds %s", tuple(round(b, 5) for b in bounds))
 
-        # --- OSM (vector features, else minimal bounds) ---------------------
+        # --- OSM (vector features and/or DEM contours, else minimal bounds) -
+        # Both feeds share one id allocator so ids stay unique/ascending across
+        # them; assemble_osm merges the streams into one osmosis-ordered file.
+        ids = vector._IdAllocator()
+        streams = []
         if tlm_path is not None:
             log.info("converting swissTLM3D features from %s: %s", tlm_path, layers)
-            map_osm = workdir / "features.osm"
-            n_nodes = vector.build_features_osm(
-                tlm_path, layers, bounds, map_osm,
+            streams.append(vector.iter_features_osm(
+                tlm_path, layers, ids, scratch=workdir,
                 source_epsg=source_epsg, keep_geojson=keep_intermediate,
+            ))
+        if contours:
+            log.info("generating contour lines from the DEM (every %d m)", contour_interval)
+            streams.append(contour.iter_contour_osm(
+                vrt, ids, workdir, interval=contour_interval,
+                source_epsg=source_epsg, keep_geojson=keep_intermediate,
+            ))
+        if streams:
+            map_osm = workdir / "map.osm"
+            n_nodes = osm.assemble_osm(
+                bounds, map_osm, streams, keep_scratch=keep_intermediate
             )
         else:
             map_osm = osm.write_bounds_osm(bounds, workdir / "bounds.osm", name=map_name)

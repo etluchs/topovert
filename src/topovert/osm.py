@@ -16,6 +16,8 @@ Node/way ids are negative (the OSM convention for not-yet-uploaded objects);
 
 from __future__ import annotations
 
+import shutil
+from collections.abc import Iterable
 from pathlib import Path
 from xml.sax.saxutils import escape
 
@@ -60,6 +62,49 @@ def way_xml(way_id: int, node_ids: list[int], tags: dict[str, str] | None = None
 def _tag_xml(key: str, value: str, *, indent: int) -> str:
     pad = " " * indent
     return f"{pad}<tag k='{escape_attr(key)}' v='{escape_attr(value)}'/>\n"
+
+
+def assemble_osm(
+    bounds: tuple[float, float, float, float],
+    dst: Path,
+    fragment_streams: Iterable[Iterable[str]],
+    *,
+    keep_scratch: bool = False,
+) -> int:
+    """Assemble OSM XML fragment streams into one osmosis-ordered ``dst`` ``.osm``.
+
+    ``fragment_streams`` is an iterable of iterables, each yielding ``<node>``/
+    ``<way>`` XML fragments (as :func:`node_xml`/:func:`way_xml` produce). All
+    streams MUST share one id allocator so node/way ids stay unique and ascending
+    across them. splitter requires the file osmosis-ordered (all nodes, ascending
+    id, before any way), so fragments are routed to separate node/way temp files
+    and concatenated — nodes block, then ways. Returns the ``<node>`` count (the
+    metric deciding whether the pipeline runs splitter).
+    """
+    nodes_path = dst.parent / (dst.name + ".nodes")
+    ways_path = dst.parent / (dst.name + ".ways")
+    nodes = 0
+    with nodes_path.open("w", encoding="utf-8") as nf, \
+            ways_path.open("w", encoding="utf-8") as wf:
+        for stream in fragment_streams:
+            for fragment in stream:
+                if fragment.startswith("  <node"):
+                    nf.write(fragment)
+                    nodes += 1
+                else:
+                    wf.write(fragment)
+
+    with dst.open("w", encoding="utf-8") as fh:
+        fh.write(OSM_HEADER)
+        fh.write(bounds_element(bounds))
+        for part in (nodes_path, ways_path):
+            with part.open(encoding="utf-8") as pf:
+                shutil.copyfileobj(pf, fh)
+        fh.write(OSM_FOOTER)
+    if not keep_scratch:
+        nodes_path.unlink(missing_ok=True)
+        ways_path.unlink(missing_ok=True)
+    return nodes
 
 
 def write_bounds_osm(

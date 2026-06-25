@@ -35,3 +35,11 @@ waterway=stream       [0x18 resolution 22]
 # --- Ferries & barriers ------------------------------------------------------
 route=ferry           [0x1b resolution 18]
 barrier=wall          [0x1d resolution 24]
+
+# --- Contours (DEM via gdal_contour; see src/topovert/contour.py) ------------
+# Label every contour with its elevation, then type bold index lines (0x22)
+# apart from intermediate ones (0x21). The name action falls through to the
+# typing rules below.
+contour=elevation { name '${ele}' }
+contour_ext=elevation_major [0x22 resolution 20]
+contour_ext=elevation_minor [0x21 resolution 22]

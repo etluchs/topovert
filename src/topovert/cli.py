@@ -7,7 +7,7 @@ import logging
 import sys
 from pathlib import Path
 
-from . import TopovertError, __version__
+from . import TopovertError, __version__, contour
 from .hgt import DEFAULT_RESOLUTION, DEM_RESOLUTIONS
 from .pipeline import build
 
@@ -63,6 +63,22 @@ def _build_parser() -> argparse.ArgumentParser:
              "core-nav set when given",
     )
     b.add_argument(
+        "--contours", action="store_true",
+        help="add elevation contour lines derived from the DEM (requires "
+             "--dem-dir); every 5th line is a bold index contour",
+    )
+    b.add_argument(
+        "--contour-interval", type=int, default=contour.DEFAULT_INTERVAL,
+        metavar="M",
+        help="contour spacing in metres (default: %(default)s)",
+    )
+    b.add_argument(
+        "--no-hillshade", dest="no_hillshade", action="store_true",
+        help="don't embed the DEM for shaded relief (much smaller .IMG); the DEM "
+             "is still used for bounds and --contours. Pair with --contours for a "
+             "lightweight contour-only map",
+    )
+    b.add_argument(
         "--max-nodes", type=int, default=None,
         help="splitter tile size in OSM nodes for large extents (default: "
              "splitter's own ~1.6M); only used when the map needs tiling",
@@ -90,12 +106,22 @@ def _cmd_build(args: argparse.Namespace) -> int:
         map_name=args.name,
         tlm_path=args.tlm,
         tlm_layers=args.tlm_layers,
+        contours=args.contours,
+        contour_interval=args.contour_interval,
+        hillshade=not args.no_hillshade,
         **({"max_nodes": args.max_nodes} if args.max_nodes else {}),
         work_dir=args.work_dir,
         keep_intermediate=args.keep_intermediate,
     )
-    dem = f"{len(result.tiles)} DEM tile(s)" if result.tiles else "no DEM"
-    print(f"Wrote {result.out_path} ({dem}).")
+    feats = []
+    if result.tiles:
+        feats.append(f"hillshade, {len(result.tiles)} DEM tile(s)")
+    if args.contours:
+        feats.append("contours")
+    if args.tlm:
+        feats.append("vector features")
+    summary = "; ".join(feats) if feats else "bounds only"
+    print(f"Wrote {result.out_path} ({summary}).")
     return 0
 
 
