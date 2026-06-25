@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import logging
 import os
-import tempfile
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -102,25 +102,52 @@ def tiles_for_area(area: str) -> list[Tile]:
     return tiles_for_bounds(*parse_area(area))
 
 
+# Network is the flakiest part of a country-scale pull (~730 MB over many tiles),
+# so transient failures — incomplete reads, resets, 5xx — are retried with
+# exponential backoff before giving up. A 404 is definitive (no such tile) and is
+# not retried. Mirrors the retry convention used elsewhere for git/network ops.
+_RETRIES = 4
+_BACKOFF_BASE_S = 2
+
+
 def _fetch(url: str, dst: Path) -> bool:
-    """Download ``url`` to ``dst`` atomically. Returns ``False`` if the tile does
-    not exist (HTTP 404 — an ocean/void cell), raises on any other failure."""
+    """Download ``url`` to ``dst`` atomically, retrying transient failures.
+
+    Returns ``False`` if the tile does not exist (HTTP 404 — an ocean/void cell),
+    raises :class:`TopovertError` if it still fails after :data:`_RETRIES`
+    attempts. The partial download lands in a ``.part`` sidecar and is renamed
+    into place only on a complete transfer, so an interrupted run never leaves a
+    truncated tile that a later run would treat as cached.
+    """
     tmp = dst.with_suffix(dst.suffix + ".part")
-    try:
-        urllib.request.urlretrieve(url, tmp)
-    except urllib.error.HTTPError as exc:
-        tmp.unlink(missing_ok=True)
-        if exc.code == 404:
-            return False
-        raise TopovertError(f"failed to download {url}: HTTP {exc.code}") from exc
-    except OSError as exc:
-        tmp.unlink(missing_ok=True)
-        raise TopovertError(
-            f"failed to download {url}: {exc}\n"
-            "Set TOPOVERT_COPERNICUS_URL to a reachable mirror if needed."
-        ) from exc
-    tmp.replace(dst)
-    return True
+    last = ""
+    for attempt in range(1, _RETRIES + 1):
+        try:
+            urllib.request.urlretrieve(url, tmp)
+        except urllib.error.HTTPError as exc:
+            tmp.unlink(missing_ok=True)
+            if exc.code == 404:
+                return False
+            last = f"HTTP {exc.code}"
+        except OSError as exc:
+            # ContentTooShortError (incomplete read), timeouts, connection
+            # resets — all OSError subclasses, all worth a retry.
+            tmp.unlink(missing_ok=True)
+            last = str(exc)
+        else:
+            tmp.replace(dst)
+            return True
+        if attempt < _RETRIES:
+            delay = _BACKOFF_BASE_S * 2 ** (attempt - 1)
+            log.warning(
+                "download of %s failed (%s); retrying in %ds [%d/%d]",
+                url, last, delay, attempt, _RETRIES,
+            )
+            time.sleep(delay)
+    raise TopovertError(
+        f"failed to download {url} after {_RETRIES} attempts: {last}\n"
+        "Set TOPOVERT_COPERNICUS_URL to a reachable mirror if needed."
+    )
 
 
 def download_area(area: str, dst_dir: Path | None = None) -> Path:

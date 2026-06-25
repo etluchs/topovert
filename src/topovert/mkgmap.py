@@ -101,10 +101,16 @@ def build_img(
             f"mkgmap failed (exit {proc.returncode}):\n{proc.stdout.strip()}\n"
             f"{proc.stderr.strip()}"
         )
-    # Surface the line confirming DEM was embedded, useful for verification.
-    for line in proc.stdout.splitlines():
-        if "DEM" in line or "dem" in line:
-            log.info("mkgmap: %s", line.strip())
+    # mkgmap warns (not fails) on plenty of real issues — unrendered tags, bad
+    # geometry, style problems — but with captured output a successful run would
+    # hide them. Surface its WARNING/SEVERE/ERROR lines so they show in our log,
+    # plus the line confirming DEM embedding (useful for verification).
+    for line in (proc.stdout + "\n" + proc.stderr).splitlines():
+        text = line.strip()
+        if any(level in line for level in ("SEVERE", "WARNING", "ERROR")):
+            log.warning("mkgmap: %s", text)
+        elif "DEM" in line or "dem" in line:
+            log.info("mkgmap: %s", text)
 
     img = out_dir / GMAPSUPP_NAME
     if not img.exists():
