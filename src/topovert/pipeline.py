@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import shutil
 import tempfile
 from dataclasses import dataclass
@@ -59,6 +60,7 @@ def build(
     contour_interval: int = contour.DEFAULT_INTERVAL,
     hillshade: bool = True,
     max_nodes: int = splitter.DEFAULT_MAX_NODES,
+    max_heap: str | None = None,
     work_dir: Path | None = None,
     keep_intermediate: bool = False,
 ) -> BuildResult:
@@ -82,6 +84,12 @@ def build(
             f"unknown resolution {resolution!r}; choose from {sorted(DEM_RESOLUTIONS)}"
         )
     samples = DEM_RESOLUTIONS[resolution]
+
+    if max_heap is not None and not re.fullmatch(r"\d+[kKmMgG]?", max_heap):
+        raise TopovertError(
+            f"invalid --max-heap {max_heap!r}; use a JVM -Xmx size like "
+            "'8g', '512m' or a plain byte count"
+        )
 
     if dem_dir is not None and dem_area is not None:
         raise TopovertError(
@@ -194,15 +202,16 @@ def build(
             log.info("%d node(s) exceeds split threshold; tiling with splitter", n_nodes)
             inputs = splitter.split(
                 java, jars.ensure_splitter(), map_osm, workdir / "split",
-                max_nodes=max_nodes,
+                max_nodes=max_nodes, max_heap=max_heap,
             )
             img = mkgmap.build_img(
                 java, jar, inputs, out_dir,
-                map_name=map_name, hgt_dir=hgt_dir, mapname=None,
+                map_name=map_name, hgt_dir=hgt_dir, mapname=None, max_heap=max_heap,
             )
         else:
             img = mkgmap.build_img(
-                java, jar, [map_osm], out_dir, map_name=map_name, hgt_dir=hgt_dir,
+                java, jar, [map_osm], out_dir,
+                map_name=map_name, hgt_dir=hgt_dir, max_heap=max_heap,
             )
 
         shutil.copyfile(img, out_path)

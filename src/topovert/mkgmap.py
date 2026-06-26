@@ -43,6 +43,7 @@ def build_img_cmd(
     mapname: str | None = MAP_NUMBER,
     style_dir: Path | None = STYLE_DIR,
     typ_file: Path | None = TYP_FILE,
+    max_heap: str | None = None,
 ) -> list[str]:
     """Argv for the mkgmap run.
 
@@ -51,10 +52,15 @@ def build_img_cmd(
     ``.osm`` (single tile) or many ``.osm.o5m`` (splitter tiles); for the latter
     pass ``mapname=None`` so mkgmap takes each tile's number from its filename.
     ``style_dir`` / ``typ_file`` apply the bundled Swiss rendering; pass ``None``
-    to fall back to mkgmap's default style/appearance.
+    to fall back to mkgmap's default style/appearance. ``max_heap`` (e.g. ``8g``)
+    sets the JVM ``-Xmx``; with the default heap mkgmap warns and throttles
+    ``max-jobs`` to 1 on large (country) maps, so a bigger heap speeds them up.
     """
-    cmd = [
-        java, "-jar", str(jar),
+    cmd = [java]
+    if max_heap is not None:
+        cmd.append("-Xmx" + max_heap)
+    cmd += [
+        "-jar", str(jar),
         "--output-dir=" + str(out_dir),
         "--description=" + map_name,
         "--family-id=" + str(FAMILY_ID),
@@ -86,13 +92,14 @@ def build_img(
     mapname: str | None = MAP_NUMBER,
     style_dir: Path | None = STYLE_DIR,
     typ_file: Path | None = TYP_FILE,
+    max_heap: str | None = None,
 ) -> Path:
     """Run mkgmap and return the path to the produced ``gmapsupp.img``."""
     out_dir.mkdir(parents=True, exist_ok=True)
     cmd = build_img_cmd(
         java, jar, osm_inputs, out_dir,
         map_name=map_name, hgt_dir=hgt_dir, mapname=mapname,
-        style_dir=style_dir, typ_file=typ_file,
+        style_dir=style_dir, typ_file=typ_file, max_heap=max_heap,
     )
     log.debug("run: %s", " ".join(cmd))
     proc = subprocess.run(cmd, capture_output=True, text=True)

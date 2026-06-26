@@ -92,6 +92,31 @@ def test_build_img_cmd_split_tiles_drop_mapname():
     assert cmd[-3:] == ["63240001.osm.o5m", "63240002.osm.o5m", str(mkgmap.TYP_FILE)]
 
 
+def test_build_img_cmd_max_heap_sets_xmx_before_jar():
+    cmd = mkgmap.build_img_cmd(
+        "java", Path("mkgmap.jar"), [Path("m.osm")], Path("out"),
+        map_name="swiss", max_heap="8g",
+    )
+    # -Xmx must precede -jar (a JVM option, not an mkgmap option)
+    assert cmd[:4] == ["java", "-Xmx8g", "-jar", "mkgmap.jar"]
+
+
+def test_build_img_cmd_no_xmx_by_default():
+    cmd = mkgmap.build_img_cmd(
+        "java", Path("mkgmap.jar"), [Path("m.osm")], Path("out"), map_name="swiss",
+    )
+    assert not any(a.startswith("-Xmx") for a in cmd)
+    assert cmd[:3] == ["java", "-jar", "mkgmap.jar"]
+
+
+def test_split_cmd_max_heap_sets_xmx_before_jar():
+    cmd = splitter.split_cmd(
+        "java", Path("splitter.jar"), Path("f.osm"), Path("split"),
+        max_nodes=1_600_000, mapid="63240001", max_heap="6g",
+    )
+    assert cmd[:4] == ["java", "-Xmx6g", "-jar", "splitter.jar"]
+
+
 def test_split_cmd_outputs_o5m_tiles():
     cmd = splitter.split_cmd(
         "java", Path("splitter.jar"), Path("features.osm"), Path("split"),
