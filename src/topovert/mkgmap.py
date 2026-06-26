@@ -22,6 +22,10 @@ FAMILY_ID = 6324
 PRODUCT_ID = 1
 MAP_NUMBER = "63240001"
 
+# Draw priority for the transparent overlay: higher draws later (on top), so the
+# topo layer sits above a lower-priority base map. mkgmap's default is 25.
+DRAW_PRIORITY = 30
+
 # Bundled Swiss topographic rendering (issue topovert-z0q): a mkgmap *style*
 # (the swissTLM3D tag -> Garmin type rules) plus a TYP source giving land cover
 # and paths Swiss colours. ``--style-file`` points at the style dir; the TYP txt
@@ -44,6 +48,7 @@ def build_img_cmd(
     style_dir: Path | None = STYLE_DIR,
     typ_file: Path | None = TYP_FILE,
     max_heap: str | None = None,
+    transparent: bool = True,
 ) -> list[str]:
     """Argv for the mkgmap run.
 
@@ -55,6 +60,9 @@ def build_img_cmd(
     to fall back to mkgmap's default style/appearance. ``max_heap`` (e.g. ``8g``)
     sets the JVM ``-Xmx``; with the default heap mkgmap warns and throttles
     ``max-jobs`` to 1 on large (country) maps, so a bigger heap speeds them up.
+    ``transparent`` (default) marks the map as an overlay so it draws *over* the
+    device's base map instead of hiding it behind an opaque tile background —
+    essential for a contour/topo overlay; pass ``False`` for a standalone map.
     """
     cmd = [java]
     if max_heap is not None:
@@ -68,6 +76,12 @@ def build_img_cmd(
         "--country-name=Switzerland",
         "--gmapsupp",
     ]
+    if transparent:
+        # Overlay, not opaque base map: without this the tile's background paints
+        # over whatever map is underneath (the device basemap), so the user sees
+        # roads/buildings flash then vanish under a solid layer. --draw-priority
+        # puts this topo overlay on top of lower-priority maps (mkgmap default 25).
+        cmd += ["--transparent", "--draw-priority=" + str(DRAW_PRIORITY)]
     if style_dir is not None:
         cmd.append("--style-file=" + str(style_dir))
     if mapname is not None:
@@ -93,6 +107,7 @@ def build_img(
     style_dir: Path | None = STYLE_DIR,
     typ_file: Path | None = TYP_FILE,
     max_heap: str | None = None,
+    transparent: bool = True,
 ) -> Path:
     """Run mkgmap and return the path to the produced ``gmapsupp.img``."""
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -100,6 +115,7 @@ def build_img(
         java, jar, osm_inputs, out_dir,
         map_name=map_name, hgt_dir=hgt_dir, mapname=mapname,
         style_dir=style_dir, typ_file=typ_file, max_heap=max_heap,
+        transparent=transparent,
     )
     log.debug("run: %s", " ".join(cmd))
     proc = subprocess.run(cmd, capture_output=True, text=True)

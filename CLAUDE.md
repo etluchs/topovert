@@ -127,6 +127,13 @@ sources with `TOPOVERT_MKGMAP_URL` / `TOPOVERT_SPLITTER_URL`.
   `java.lang.Error: This file has too many entities in a block. Parsers will reject it.` o5m is a
   flat streaming format with no block limit and mkgmap reads it natively (`splitter.py` globs
   `*.o5m`). A single small tile happens to fit a PBF block, so this only bites at large extents.
+- **The map is built as a transparent overlay** (`mkgmap --transparent --draw-priority=30`, default;
+  `--opaque` to disable). Without it, the Garmin detail tile's opaque background paints over whatever
+  map is underneath, so on-device the base map's roads/buildings flash then vanish under a solid
+  layer (very visible on a Fenix with a contour-only map). `--transparent` marks it an overlay so
+  lower maps show through where this one has no fill; `--draw-priority` (>mkgmap's default 25) keeps
+  the topo layer on top. `mkgmap.build_img(..., transparent=...)` threads it; `pipeline.build` passes
+  `transparent=not --opaque`.
 - **mkgmap/splitter are heap-bound on country-scale maps**: with the default JVM heap mkgmap warns
   ("consider increasing … -Xmx") and sets `max-jobs` to 1, so the run is single-threaded and slow
   (the map still builds correctly). `--max-heap <size>` (e.g. `8g`) injects `-Xmx` before `-jar` in

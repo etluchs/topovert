@@ -61,6 +61,7 @@ def build(
     hillshade: bool = True,
     max_nodes: int = splitter.DEFAULT_MAX_NODES,
     max_heap: str | None = None,
+    transparent: bool = True,
     work_dir: Path | None = None,
     keep_intermediate: bool = False,
 ) -> BuildResult:
@@ -212,12 +213,14 @@ def build(
             )
             img = mkgmap.build_img(
                 java, jar, inputs, out_dir,
-                map_name=map_name, hgt_dir=hgt_dir, mapname=None, max_heap=max_heap,
+                map_name=map_name, hgt_dir=hgt_dir, mapname=None,
+                max_heap=max_heap, transparent=transparent,
             )
         else:
             img = mkgmap.build_img(
                 java, jar, [map_osm], out_dir,
-                map_name=map_name, hgt_dir=hgt_dir, max_heap=max_heap,
+                map_name=map_name, hgt_dir=hgt_dir,
+                max_heap=max_heap, transparent=transparent,
             )
 
         shutil.copyfile(img, out_path)

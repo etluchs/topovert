@@ -63,6 +63,24 @@ def test_build_img_cmd_single_tile_with_dem():
     assert cmd[-2] == "bounds.osm"
 
 
+def test_build_img_cmd_is_transparent_overlay_by_default():
+    cmd = mkgmap.build_img_cmd(
+        "java", Path("mkgmap.jar"), [Path("c.osm")], Path("out"), map_name="swiss",
+    )
+    # marked transparent so it overlays the device base map, not hides it
+    assert "--transparent" in cmd
+    assert f"--draw-priority={mkgmap.DRAW_PRIORITY}" in cmd
+
+
+def test_build_img_cmd_opaque_when_transparent_false():
+    cmd = mkgmap.build_img_cmd(
+        "java", Path("mkgmap.jar"), [Path("c.osm")], Path("out"),
+        map_name="swiss", transparent=False,
+    )
+    assert "--transparent" not in cmd
+    assert not any(a.startswith("--draw-priority=") for a in cmd)
+
+
 def test_build_img_cmd_style_can_be_disabled():
     cmd = mkgmap.build_img_cmd(
         "java", Path("mkgmap.jar"), [Path("features.osm")], Path("out"),

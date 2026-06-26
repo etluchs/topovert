@@ -98,6 +98,12 @@ def _build_parser() -> argparse.ArgumentParser:
              "them up",
     )
     b.add_argument(
+        "--opaque", action="store_true",
+        help="build a standalone (non-transparent) map. By default the map is "
+             "transparent so it overlays the device's base map (roads/towns "
+             "show through); use this only if topovert is your sole base map",
+    )
+    b.add_argument(
         "--work-dir", type=Path, default=None,
         help="directory for (large) intermediates; defaults next to --out. Point "
              "it at a roomy filesystem for whole-country builds (avoid small tmpfs)",
@@ -126,6 +132,7 @@ def _cmd_build(args: argparse.Namespace) -> int:
         hillshade=not args.no_hillshade,
         **({"max_nodes": args.max_nodes} if args.max_nodes else {}),
         max_heap=args.max_heap,
+        transparent=not args.opaque,
         work_dir=args.work_dir,
         keep_intermediate=args.keep_intermediate,
     )
