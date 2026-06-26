@@ -119,11 +119,17 @@ def build(
     embed_dem = have_dem and hillshade
     gdal_tools.check_available(need_hgt=embed_dem, need_contour=contours)
     java = jars.find_java()
-    # Resolve --dem-area to a local directory of GeoTIFFs (cached across runs).
+    # Resolve the DEM tiles: either the explicit tiles covering --dem-area
+    # (auto-downloaded into a shared cache) or every GeoTIFF in --dem-dir. Using
+    # the area's exact tile list — not a glob of the cache dir — keeps a small
+    # bbox build from sweeping in tiles a previous larger download cached.
     if dem_area is not None:
         log.info("auto-downloading Copernicus GLO-30 DEM for area %r", dem_area)
-        dem_dir = dem_download.download_area(dem_area)
-    tifs = _find_geotiffs(dem_dir) if dem_dir is not None else []
+        tifs = dem_download.download_area(dem_area)
+    elif dem_dir is not None:
+        tifs = _find_geotiffs(dem_dir)
+    else:
+        tifs = []
     layers = tlm_layers or list(vector.DEFAULT_TLM_LAYERS)
     if tlm_path is not None:
         tlm_path = tlm_path.resolve()
@@ -144,7 +150,7 @@ def build(
         # --- bounds, and the optional DEM (HGT tiles) -----------------------
         tiles = []
         hgt_dir: Path | None = None
-        if dem_dir is not None:
+        if have_dem:
             # The mosaic is always built — it gives the bounds and feeds
             # gdal_contour — but the HGT tiles + --dem embed only happen when
             # hillshading (the heavy part: a contour-only map skips them).

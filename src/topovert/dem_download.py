@@ -150,40 +150,45 @@ def _fetch(url: str, dst: Path) -> bool:
     )
 
 
-def download_area(area: str, dst_dir: Path | None = None) -> Path:
+def download_area(area: str, dst_dir: Path | None = None) -> list[Path]:
     """Download the Copernicus GLO-30 tiles covering ``area`` and return their
-    directory (usable as ``--dem-dir``).
+    file paths (the GeoTIFFs to feed the build).
 
     ``area`` is a named area or a WGS84 bbox (see :func:`parse_area`). Tiles are
     cached in ``dst_dir`` (default: ``<cache>/copernicus-dem-30m``); already
-    present tiles are reused, and ocean cells with no tile are skipped. Raises if
-    the area resolves to no available tile at all.
+    present tiles are reused, and ocean cells with no tile are skipped. Returns
+    only the tiles covering ``area`` — NOT every file in the (shared) cache — so
+    a small bbox build never accidentally pulls in tiles a previous larger
+    download left behind. Raises if the area resolves to no available tile.
     """
     tiles = tiles_for_area(area)
     dst = dst_dir or (cache_dir() / "copernicus-dem-30m")
     dst.mkdir(parents=True, exist_ok=True)
 
+    paths: list[Path] = []
     have, fetched, missing = 0, 0, 0
     for tile in tiles:
         local = dst / f"{_tile_basename(tile)}.tif"
         if local.exists() and local.stat().st_size > 0:
             have += 1
+            paths.append(local)
             continue
         url = tile_url(tile)
         log.info("downloading DEM tile %s ...", _tile_basename(tile))
         if _fetch(url, local):
             fetched += 1
+            paths.append(local)
         else:
             missing += 1
             log.debug("no Copernicus tile for %s (void/ocean cell)", tile.name)
 
     log.info(
         "DEM for %r: %d tile(s) ready (%d downloaded, %d cached, %d void) in %s",
-        area, have + fetched, fetched, have, missing, dst,
+        area, len(paths), fetched, have, missing, dst,
     )
-    if have + fetched == 0:
+    if not paths:
         raise TopovertError(
             f"no Copernicus DEM tiles available for --dem-area {area!r} "
             f"(checked {len(tiles)} cell(s)); is the area over land?"
         )
-    return dst
+    return paths
