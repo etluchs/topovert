@@ -42,22 +42,24 @@ _ELEV_ATTR = "ele"
 
 
 def gdal_contour_cmd(
-    src: Path, dst: Path, *, interval: int, elev_attr: str = _ELEV_ATTR
+    src: Path, dst: Path, *, interval: int, elev_attr: str = _ELEV_ATTR,
+    snodata: float | None = None,
 ) -> list[str]:
     """argv for ``gdal_contour`` writing a GPKG of contour lines from ``src``.
 
     ``-i`` sets the spacing in the DEM's vertical unit (metres for swissALTI3D /
     Copernicus); ``-a`` names the elevation attribute. GPKG output preserves the
     source CRS so the later ``ogr2ogr`` reprojection to WGS84 is unambiguous.
+    ``snodata`` (when given) is passed as ``-snodata`` so void cells don't get
+    contoured into long spurious lines — see :func:`gdal_tools.band_nodata`.
     """
-    return [
-        "gdal_contour",
-        "-i", str(interval),
-        "-a", elev_attr,
-        "-f", "GPKG",
-        str(src),
-        str(dst),
-    ]
+    cmd = ["gdal_contour", "-i", str(interval), "-a", elev_attr]
+    if snodata is not None:
+        # Integer-valued sentinels (e.g. -9999, -32768) read cleaner as ints.
+        snd = int(snodata) if float(snodata).is_integer() else snodata
+        cmd += ["-snodata", str(snd)]
+    cmd += ["-f", "GPKG", str(src), str(dst)]
+    return cmd
 
 
 def contour_tags(ele: float, *, interval: int, major_every: int) -> dict[str, str]:
@@ -127,7 +129,8 @@ def iter_contour_osm(
     """
     gpkg = scratch / "contours.gpkg"
     geojson = scratch / "contours.geojsonl"
-    gdal_tools._run(gdal_contour_cmd(dem_src, gpkg, interval=interval))
+    snodata = gdal_tools.band_nodata(dem_src)
+    gdal_tools._run(gdal_contour_cmd(dem_src, gpkg, interval=interval, snodata=snodata))
     gdal_tools._run(vector.ogr_geojson_cmd(
         gpkg, _CONTOUR_LAYER, geojson, source_epsg=source_epsg
     ))
