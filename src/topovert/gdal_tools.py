@@ -136,6 +136,21 @@ def wgs84_bounds(src: Path) -> tuple[float, float, float, float]:
     return (min(lons), min(lats), max(lons), max(lats))
 
 
+def band_nodata(src: Path) -> float | None:
+    """The first band's NoData value for ``src`` (via ``gdalinfo -json``), or None.
+
+    ``gdal_contour`` will otherwise trace contours straight through void/NoData
+    cells (tile gaps, the area outside an irregular DEM footprint), producing
+    long spurious lines across the map. Passing this back as ``-snodata`` masks
+    them. Returns None when the source declares no NoData value.
+    """
+    info = json.loads(_run(["gdalinfo", "-json", str(src)]).stdout)
+    bands = info.get("bands") or []
+    if bands and bands[0].get("noDataValue") is not None:
+        return float(bands[0]["noDataValue"])
+    return None
+
+
 def make_hgt_tile(
     src: Path,
     tile: Tile,

@@ -16,6 +16,19 @@ def test_gdal_contour_cmd_sets_interval_attr_and_gpkg():
     assert cmd[-2:] == ["mosaic.vrt", "c.gpkg"]
 
 
+def test_gdal_contour_cmd_omits_snodata_by_default():
+    cmd = contour.gdal_contour_cmd(Path("m.vrt"), Path("c.gpkg"), interval=20)
+    assert "-snodata" not in cmd
+
+
+def test_gdal_contour_cmd_passes_snodata_as_int_when_integral():
+    cmd = contour.gdal_contour_cmd(
+        Path("m.vrt"), Path("c.gpkg"), interval=20, snodata=-9999.0
+    )
+    # integral sentinels render without a trailing ".0"
+    assert cmd[cmd.index("-snodata") + 1] == "-9999"
+
+
 def test_contour_tags_classifies_major_and_minor():
     # every 5th * 20 m == each 100 m is a bold index (major) line
     assert contour.contour_tags(100, interval=20, major_every=5) == {
