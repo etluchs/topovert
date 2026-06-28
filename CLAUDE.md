@@ -14,8 +14,9 @@ buildings, POIs, and walls. `--contours` adds elevation contour lines derived fr
 Either input is optional: `--tlm` alone makes a **vector-only** map (no DEM), `--dem-dir` alone a
 hillshade-only map. Large extents (up to whole-country) are tiled with **splitter** automatically.
 `--dem-area <name|bbox>` (e.g. `switzerland`) auto-downloads the covering **Copernicus GLO-30**
-(~30 m) DEM tiles in place of `--dem-dir`. Full swissTLM3D/swissALTI3D STAC area selection is still
-deferred (`bd show topovert-y8s`).
+(~30 m) DEM tiles in place of `--dem-dir`. A separate `render-contours` command previews a patch's
+contours as an SVG (for checking geometry + elevation labels without building an `.IMG`). Full
+swissTLM3D/swissALTI3D STAC area selection is still deferred (`bd show topovert-y8s`).
 
 ## Keep the docs in sync
 
@@ -63,7 +64,8 @@ always built (bounds + contours), but the HGT tiles + `--dem` embed only happen 
 (splitter if large →) `mkgmap --gmapsupp [--dem]` → single loadable `gmapsupp.img`. Modules: `hgt.py` (SRTM
 tiling geometry — unit-tested), `gdal_tools.py` (GDAL argv builders + exec), `osm.py` (OSM XML
 writer + node/way serializers + `assemble_osm`), `vector.py` (swissTLM3D → GeoJSON → OSM, data-only
-`TAG_MAP`, bounds), `contour.py` (DEM → `gdal_contour` → OSM contour ways), `dem_download.py`
+`TAG_MAP`, bounds), `contour.py` (DEM → `gdal_contour` → OSM contour ways), `contour_render.py` (the
+`render-contours` dev utility: DEM/GeoJSON → standalone SVG of contour lines + labels), `dem_download.py`
 (`--dem-area` → Copernicus GLO-30 tile download-cache), `jars.py` (Java +
 mkgmap/splitter download-cache), `splitter.py`, `mkgmap.py` (the `.IMG` build), `cli.py`. The bundled mkgmap
 **style + TYP** live under `src/topovert/styles/` (`topovert/` rule files + `topovert_typ.txt`);
@@ -84,6 +86,8 @@ uv run topovert build --dem-dir ./tiles --contours --out ./out/swiss.img        
 uv run topovert build --dem-dir ./tiles --contours --no-hillshade --out ./out/c.img  # contour-only (no DEM embed)
 uv run topovert build --dem-area switzerland --contours --no-hillshade --out ./out/ch.img  # auto-download DEM, contour-only
 uv run topovert build --dem-area switzerland --contours --no-hillshade --max-heap 8g --out ./out/ch.img  # faster: bigger JVM heap
+uv run topovert render-contours --dem-area "8.0,46.55,8.1,46.65" --out ./out/patch.svg  # preview contours as SVG
+uv run topovert render-contours --from-geojson contours.geojsonl --out patch.svg        # render a kept intermediate
 uv run topovert -v build ... --keep-intermediate                # debug: verbose + keep workdir
 ```
 
@@ -143,6 +147,22 @@ sources with `TOPOVERT_MKGMAP_URL` / `TOPOVERT_SPLITTER_URL`.
 - **Filled water areas come from `TLM_BODENBEDECKUNG` polygons** (`OBJEKTART IN (5,10)` = river surface
   + lake), *not* `TLM_STEHENDES_GEWAESSER`, whose features are unclosed shoreline **lines** that can't
   fill as area. `vector.LAYER_WHERE` filters land cover to water at export time.
+- **Garmin stores contour elevations in *feet*, so the style must emit feet, not metres.** The
+  `.IMG` format records a contour line's elevation in feet and the device converts that number to
+  the user's display unit. Writing the raw metre value makes a metric watch read e.g. a 2000 m line
+  as 2000 ft and show ~610 m — the "metres interpreted as feet" bug. The contour name rule in
+  `styles/topovert/lines` therefore uses `name '${ele|conv:m=>ft}'`. The OSM `ele` tag and the
+  `render-contours` SVG stay in metres (ground truth); only the on-device label is converted.
+- **`gdal_contour` traces lines straight through DEM voids/NoData** (tile gaps, area outside an
+  irregular DEM footprint), producing long spurious lines across the map. `gdal_tools.band_nodata`
+  reads the source's NoData via `gdalinfo -json` and `contour.gdal_contour_cmd` passes it as
+  `-snodata` to mask them. Sources that declare no NoData get no `-snodata` (nothing to mask).
+- **`render-contours` is the cheap contour check** (`contour_render.py`): it runs the same
+  `gdal_contour → ogr2ogr` steps as the build and renders the WGS84 line geometry + index-line
+  elevation labels to a standalone SVG. Use it to spot bad geometry or wrong spacing without
+  building/loading an `.IMG`; it can also render a kept `contours.geojsonl` (`--from-geojson`, no
+  GDAL). It renders *our* data (correct metres), so it can't reveal device-side unit bugs — that's
+  what the `conv:m=>ft` rule above is for.
 - **The Swiss rendering is a mkgmap style + a text TYP** (`src/topovert/styles/`). The style's
   `lines`/`points`/`polygons` map the OSM tags `vector.py` emits to Garmin type codes + resolutions;
   `topovert_typ.txt` recolours the topo-relevant types (land cover, paths, watercourses). mkgmap

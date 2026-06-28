@@ -40,6 +40,13 @@ barrier=wall          [0x1d resolution 24]
 # Label every contour with its elevation, then type bold index lines (0x22)
 # apart from intermediate ones (0x21). The name action falls through to the
 # typing rules below.
-contour=elevation { name '${ele}' }
+#
+# `conv:m=>ft` is NOT cosmetic: Garmin stores a contour line's elevation in
+# *feet* in the .IMG format, and the device converts that stored number to the
+# user's display unit. So writing the raw metre value makes a metric watch read
+# e.g. a 2000 m line as 2000 ft and show ~610 m — the "metres interpreted as
+# feet" bug. Emitting feet here means the device shows the correct elevation in
+# whatever unit it's set to. (See the mkgmap/phygtmap contour docs.)
+contour=elevation { name '${ele|conv:m=>ft}' }
 contour_ext=elevation_major [0x22 resolution 20]
 contour_ext=elevation_minor [0x21 resolution 22]

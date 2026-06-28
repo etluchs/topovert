@@ -27,9 +27,12 @@ v1 turns freely available Swisstopo data into a Garmin `.IMG`. It is a thin Pyth
 - Either input is optional: `--tlm` alone makes a **vector-only** map, `--dem-dir` alone a
   hillshade-only map. Large extents (up to whole-country) are tiled with **splitter** automatically.
 - **Elevation contour lines** derived from the DEM (`--contours`), spaced every `--contour-interval`
-  metres (default 20 m) with every 5th drawn as a bold index line. `--no-hillshade` skips embedding
-  the (large) DEM for shaded relief, so `--contours --no-hillshade` yields a lightweight
-  contour-only map.
+  metres (default 20 m) with every 5th drawn as a bold index line. Labels show the correct elevation
+  in whatever unit the device is set to (the style emits feet, which Garmin's `.IMG` format expects).
+  `--no-hillshade` skips embedding the (large) DEM for shaded relief, so `--contours --no-hillshade`
+  yields a lightweight contour-only map.
+- **Preview contours as an SVG** (`render-contours`): render a patch's contour geometry + elevation
+  labels to an SVG you can open in a browser, to check them quickly without building/loading an `.IMG`.
 - A bundled **Swiss topographic style + TYP** colours the output (forest, rock, glacier and water
   fills; red paths; brown contours; Swiss-tuned road/rail rendering) so the map is legible on-device
   out of the box.
@@ -69,11 +72,18 @@ uv run topovert build --dem-dir ./swissalti3d_tiles --contours --no-hillshade --
 # No local tiles? Auto-download the DEM for an area (Copernicus GLO-30) and build
 # a whole-Switzerland contour-only map (no shading) — ideal for a Garmin Fenix:
 uv run topovert build --dem-area switzerland --contours --no-hillshade --out ./out/swiss-contours.img
+
+# Sanity-check the contours for a small patch without building an .IMG: render
+# the line geometry + elevation labels to an SVG you can open in a browser.
+uv run topovert render-contours --dem-area "8.0,46.55,8.1,46.65" --out ./out/patch.svg
+uv run topovert render-contours --dem-dir ./swissalti3d_tiles --bbox 8.0,46.55,8.1,46.65 \
+    --out ./out/patch.svg
 ```
 
 Then copy the `.IMG` to your Garmin device (or load it in BaseCamp) to see the shaded relief.
 Run `topovert build --help` for options (resolution, resampling, source EPSG, `--tlm`/`--tlm-layer`,
-`--contours`/`--contour-interval`, `--no-hillshade`, `--max-heap`, `--opaque`).
+`--contours`/`--contour-interval`, `--no-hillshade`, `--max-heap`, `--opaque`), or
+`topovert render-contours --help` to preview contours for a patch as an SVG.
 
 > **The map is a transparent overlay by default**, so it draws *on top of* your device's base map
 > (roads, towns and labels show through between the contours/features) instead of hiding it behind an

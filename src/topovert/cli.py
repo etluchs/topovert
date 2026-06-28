@@ -7,9 +7,23 @@ import logging
 import sys
 from pathlib import Path
 
-from . import TopovertError, __version__, contour
+from . import TopovertError, __version__, contour, contour_render
 from .hgt import DEFAULT_RESOLUTION, DEM_RESOLUTIONS
 from .pipeline import build
+
+
+def _parse_bbox(value: str) -> tuple[float, float, float, float]:
+    """Parse a ``min_lon,min_lat,max_lon,max_lat`` WGS84 bbox string."""
+    try:
+        parts = [float(p) for p in value.split(",")]
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"bbox must be 4 numbers, got {value!r}")
+    if len(parts) != 4:
+        raise argparse.ArgumentTypeError(
+            f"bbox needs 4 comma-separated numbers (min_lon,min_lat,max_lon,max_lat), "
+            f"got {len(parts)}"
+        )
+    return tuple(parts)  # type: ignore[return-value]
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -113,6 +127,51 @@ def _build_parser() -> argparse.ArgumentParser:
         help="keep the temp workdir (VRT, HGT tiles, OSM, GeoJSON) for inspection",
     )
     b.set_defaults(func=_cmd_build)
+
+    # --- render-contours: eyeball a patch's contours as an SVG ----------------
+    r = sub.add_parser(
+        "render-contours",
+        help="render contour lines for a patch to an SVG (for checking geometry "
+             "+ elevation labels without building/loading an .IMG)",
+    )
+    r.add_argument(
+        "--dem-dir", type=Path, default=None,
+        help="directory of DEM GeoTIFF tiles to derive contours from",
+    )
+    r.add_argument(
+        "--dem-area", default=None, metavar="AREA",
+        help="auto-download the DEM for an area instead of --dem-dir (named area "
+             "or WGS84 bbox); pair with a small --bbox to keep it fast",
+    )
+    r.add_argument(
+        "--from-geojson", type=Path, default=None, metavar="FILE",
+        help="render an existing GeoJSONSeq of contours (e.g. a kept "
+             "contours.geojsonl) instead of running GDAL",
+    )
+    r.add_argument("--out", type=Path, required=True, help="output .svg path")
+    r.add_argument(
+        "--bbox", type=_parse_bbox, default=None,
+        metavar="min_lon,min_lat,max_lon,max_lat",
+        help="WGS84 patch to crop the DEM to (and the SVG viewport); recommended "
+             "for large DEM sources",
+    )
+    r.add_argument(
+        "--contour-interval", type=int, default=contour.DEFAULT_INTERVAL,
+        metavar="M", help="contour spacing in metres (default: %(default)s)",
+    )
+    r.add_argument(
+        "--source-epsg", type=int, default=None,
+        help="EPSG of the DEM source (default: auto-detect from its CRS)",
+    )
+    r.add_argument(
+        "--width", type=int, default=1000, metavar="PX",
+        help="SVG image width in pixels (default: %(default)s)",
+    )
+    r.add_argument(
+        "--keep-intermediate", action="store_true",
+        help="keep the temp workdir (VRT, clip, GPKG, GeoJSON) for inspection",
+    )
+    r.set_defaults(func=_cmd_render_contours)
     return parser
 
 
@@ -145,6 +204,22 @@ def _cmd_build(args: argparse.Namespace) -> int:
         feats.append("vector features")
     summary = "; ".join(feats) if feats else "bounds only"
     print(f"Wrote {result.out_path} ({summary}).")
+    return 0
+
+
+def _cmd_render_contours(args: argparse.Namespace) -> int:
+    out = contour_render.render_patch(
+        args.out,
+        dem_dir=args.dem_dir,
+        dem_area=args.dem_area,
+        from_geojson=args.from_geojson,
+        bbox=args.bbox,
+        interval=args.contour_interval,
+        source_epsg=args.source_epsg,
+        width=args.width,
+        keep_intermediate=args.keep_intermediate,
+    )
+    print(f"Wrote {out} (open it in a browser to check the contours).")
     return 0
 
 
