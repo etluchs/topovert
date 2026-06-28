@@ -85,6 +85,7 @@ uv run topovert build --dem-dir ./tiles --tlm ./tlm.gdb --out ./out/swiss.img   
 uv run topovert build --dem-dir ./tiles --contours --out ./out/swiss.img        # + contour lines
 uv run topovert build --dem-dir ./tiles --contours --no-hillshade --out ./out/c.img  # contour-only (no DEM embed)
 uv run topovert build --dem-area switzerland --contours --no-hillshade --out ./out/ch.img  # auto-download DEM, contour-only
+uv run topovert build --dem-area switzerland --contours --no-hillshade --max-heap 8g --out ./out/ch.img  # faster: bigger JVM heap
 uv run topovert render-contours --dem-area "8.0,46.55,8.1,46.65" --out ./out/patch.svg  # preview contours as SVG
 uv run topovert render-contours --from-geojson contours.geojsonl --out patch.svg        # render a kept intermediate
 uv run topovert -v build ... --keep-intermediate                # debug: verbose + keep workdir
@@ -124,6 +125,25 @@ sources with `TOPOVERT_MKGMAP_URL` / `TOPOVERT_SPLITTER_URL`.
   it dies with "Node ids are not sorted". `vector._IdAllocator` counts up (positive ids, separate
   node/way counters) and `build_features_osm` streams nodes and ways to separate temp files then
   concatenates (nodes block, then ways). splitter is auto-downloaded + SHA-pinned like mkgmap.
+- **splitter must emit `--output=o5m`, not pbf**: PBF packs entities into fixed fileblocks with a
+  per-block entity/size cap. Dense `--contours` data (very long ways with huge node arrays — e.g.
+  whole-Switzerland 20 m contours, ~124 M nodes) overflows a block and splitter aborts with
+  `java.lang.Error: This file has too many entities in a block. Parsers will reject it.` o5m is a
+  flat streaming format with no block limit and mkgmap reads it natively (`splitter.py` globs
+  `*.o5m`). A single small tile happens to fit a PBF block, so this only bites at large extents.
+- **The map is built as a transparent overlay** (`mkgmap --transparent --draw-priority=30`, default;
+  `--opaque` to disable). Without it, the Garmin detail tile's opaque background paints over whatever
+  map is underneath, so on-device the base map's roads/buildings flash then vanish under a solid
+  layer (very visible on a Fenix with a contour-only map). `--transparent` marks it an overlay so
+  lower maps show through where this one has no fill; `--draw-priority` (>mkgmap's default 25) keeps
+  the topo layer on top. `mkgmap.build_img(..., transparent=...)` threads it; `pipeline.build` passes
+  `transparent=not --opaque`.
+- **mkgmap/splitter are heap-bound on country-scale maps**: with the default JVM heap mkgmap warns
+  ("consider increasing … -Xmx") and sets `max-jobs` to 1, so the run is single-threaded and slow
+  (the map still builds correctly). `--max-heap <size>` (e.g. `8g`) injects `-Xmx` before `-jar` in
+  both java invocations (`mkgmap.build_img_cmd` / `splitter.split_cmd`); it's opt-in (default: no
+  `-Xmx`, JVM picks ~¼ RAM) so small builds are unaffected. `mkgmap.build_img` surfaces mkgmap's
+  WARNING/SEVERE/ERROR lines to our log on success (they'd otherwise be swallowed with its output).
 - **Filled water areas come from `TLM_BODENBEDECKUNG` polygons** (`OBJEKTART IN (5,10)` = river surface
   + lake), *not* `TLM_STEHENDES_GEWAESSER`, whose features are unclosed shoreline **lines** that can't
   fill as area. `vector.LAYER_WHERE` filters land cover to water at export time.

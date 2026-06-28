@@ -22,6 +22,10 @@ FAMILY_ID = 6324
 PRODUCT_ID = 1
 MAP_NUMBER = "63240001"
 
+# Draw priority for the transparent overlay: higher draws later (on top), so the
+# topo layer sits above a lower-priority base map. mkgmap's default is 25.
+DRAW_PRIORITY = 30
+
 # Bundled Swiss topographic rendering (issue topovert-z0q): a mkgmap *style*
 # (the swissTLM3D tag -> Garmin type rules) plus a TYP source giving land cover
 # and paths Swiss colours. ``--style-file`` points at the style dir; the TYP txt
@@ -43,18 +47,28 @@ def build_img_cmd(
     mapname: str | None = MAP_NUMBER,
     style_dir: Path | None = STYLE_DIR,
     typ_file: Path | None = TYP_FILE,
+    max_heap: str | None = None,
+    transparent: bool = True,
 ) -> list[str]:
     """Argv for the mkgmap run.
 
     ``--gmapsupp`` makes the loadable single-file product. ``hgt_dir`` adds
     ``--dem`` for hillshading (omit for a vector-only map). ``osm_inputs`` is one
-    ``.osm`` (single tile) or many ``.osm.pbf`` (splitter tiles); for the latter
+    ``.osm`` (single tile) or many ``.osm.o5m`` (splitter tiles); for the latter
     pass ``mapname=None`` so mkgmap takes each tile's number from its filename.
     ``style_dir`` / ``typ_file`` apply the bundled Swiss rendering; pass ``None``
-    to fall back to mkgmap's default style/appearance.
+    to fall back to mkgmap's default style/appearance. ``max_heap`` (e.g. ``8g``)
+    sets the JVM ``-Xmx``; with the default heap mkgmap warns and throttles
+    ``max-jobs`` to 1 on large (country) maps, so a bigger heap speeds them up.
+    ``transparent`` (default) marks the map as an overlay so it draws *over* the
+    device's base map instead of hiding it behind an opaque tile background —
+    essential for a contour/topo overlay; pass ``False`` for a standalone map.
     """
-    cmd = [
-        java, "-jar", str(jar),
+    cmd = [java]
+    if max_heap is not None:
+        cmd.append("-Xmx" + max_heap)
+    cmd += [
+        "-jar", str(jar),
         "--output-dir=" + str(out_dir),
         "--description=" + map_name,
         "--family-id=" + str(FAMILY_ID),
@@ -62,6 +76,12 @@ def build_img_cmd(
         "--country-name=Switzerland",
         "--gmapsupp",
     ]
+    if transparent:
+        # Overlay, not opaque base map: without this the tile's background paints
+        # over whatever map is underneath (the device basemap), so the user sees
+        # roads/buildings flash then vanish under a solid layer. --draw-priority
+        # puts this topo overlay on top of lower-priority maps (mkgmap default 25).
+        cmd += ["--transparent", "--draw-priority=" + str(DRAW_PRIORITY)]
     if style_dir is not None:
         cmd.append("--style-file=" + str(style_dir))
     if mapname is not None:
@@ -69,7 +89,7 @@ def build_img_cmd(
     if hgt_dir is not None:
         cmd.append("--dem=" + str(hgt_dir))
     cmd += [str(p) for p in osm_inputs]
-    # The TYP must follow the .osm/.pbf inputs so mkgmap binds it to this map.
+    # The TYP must follow the .osm/.o5m inputs so mkgmap binds it to this map.
     if typ_file is not None:
         cmd.append(str(typ_file))
     return cmd
@@ -86,13 +106,16 @@ def build_img(
     mapname: str | None = MAP_NUMBER,
     style_dir: Path | None = STYLE_DIR,
     typ_file: Path | None = TYP_FILE,
+    max_heap: str | None = None,
+    transparent: bool = True,
 ) -> Path:
     """Run mkgmap and return the path to the produced ``gmapsupp.img``."""
     out_dir.mkdir(parents=True, exist_ok=True)
     cmd = build_img_cmd(
         java, jar, osm_inputs, out_dir,
         map_name=map_name, hgt_dir=hgt_dir, mapname=mapname,
-        style_dir=style_dir, typ_file=typ_file,
+        style_dir=style_dir, typ_file=typ_file, max_heap=max_heap,
+        transparent=transparent,
     )
     log.debug("run: %s", " ".join(cmd))
     proc = subprocess.run(cmd, capture_output=True, text=True)
@@ -101,10 +124,16 @@ def build_img(
             f"mkgmap failed (exit {proc.returncode}):\n{proc.stdout.strip()}\n"
             f"{proc.stderr.strip()}"
         )
-    # Surface the line confirming DEM was embedded, useful for verification.
-    for line in proc.stdout.splitlines():
-        if "DEM" in line or "dem" in line:
-            log.info("mkgmap: %s", line.strip())
+    # mkgmap warns (not fails) on plenty of real issues — unrendered tags, bad
+    # geometry, style problems — but with captured output a successful run would
+    # hide them. Surface its WARNING/SEVERE/ERROR lines so they show in our log,
+    # plus the line confirming DEM embedding (useful for verification).
+    for line in (proc.stdout + "\n" + proc.stderr).splitlines():
+        text = line.strip()
+        if any(level in line for level in ("SEVERE", "WARNING", "ERROR")):
+            log.warning("mkgmap: %s", text)
+        elif "DEM" in line or "dem" in line:
+            log.info("mkgmap: %s", text)
 
     img = out_dir / GMAPSUPP_NAME
     if not img.exists():

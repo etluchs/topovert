@@ -105,6 +105,19 @@ def _build_parser() -> argparse.ArgumentParser:
              "splitter's own ~1.6M); only used when the map needs tiling",
     )
     b.add_argument(
+        "--max-heap", default=None, metavar="SIZE",
+        help="JVM -Xmx for mkgmap/splitter (e.g. '8g', '512m'). Big "
+             "(country-scale) builds otherwise warn and throttle to a single "
+             "job under the default heap; raise it to parallelise and speed "
+             "them up",
+    )
+    b.add_argument(
+        "--opaque", action="store_true",
+        help="build a standalone (non-transparent) map. By default the map is "
+             "transparent so it overlays the device's base map (roads/towns "
+             "show through); use this only if topovert is your sole base map",
+    )
+    b.add_argument(
         "--work-dir", type=Path, default=None,
         help="directory for (large) intermediates; defaults next to --out. Point "
              "it at a roomy filesystem for whole-country builds (avoid small tmpfs)",
@@ -177,6 +190,8 @@ def _cmd_build(args: argparse.Namespace) -> int:
         contour_interval=args.contour_interval,
         hillshade=not args.no_hillshade,
         **({"max_nodes": args.max_nodes} if args.max_nodes else {}),
+        max_heap=args.max_heap,
+        transparent=not args.opaque,
         work_dir=args.work_dir,
         keep_intermediate=args.keep_intermediate,
     )

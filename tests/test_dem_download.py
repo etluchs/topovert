@@ -5,6 +5,8 @@ construction, area parsing, caching/skip logic and error paths without touching
 the toolchain or the AWS mirror.
 """
 
+import urllib.error
+
 import pytest
 
 from topovert import TopovertError, dem_download
@@ -56,17 +58,16 @@ def test_switzerland_resolves_to_the_18_country_tiles():
     assert {t.lat for t in tiles} == {45, 46, 47}
 
 
-def test_download_area_caches_and_skips_voids(tmp_path, monkeypatch):
-    """Existing tiles are reused; a 404/void cell is skipped, not fatal."""
-    # Pre-seed one tile as already cached.
-    cached = tmp_path / f"{dem_download._tile_basename(Tile(lat=45, lon=5))}.tif"
+def test_download_area_returns_area_tiles_caches_and_skips_voids(tmp_path, monkeypatch):
+    """Returns the area's tiles; cached ones reused; a void cell skipped."""
+    # bbox covers 4 cells: (45,6) (45,7) (46,6) (46,7). Pre-seed one as cached.
+    cached = tmp_path / f"{dem_download._tile_basename(Tile(lat=45, lon=6))}.tif"
     cached.write_bytes(b"\x00")
 
     fetched: list[str] = []
 
     def fake_fetch(url, dst):
-        # Pretend the western-most remaining cells are ocean voids (404 -> False).
-        if "W" in url or "_E005_" in url:
+        if "N46_00_E007" in url:  # pretend this cell is a void (404 -> False)
             return False
         fetched.append(url)
         dst.write_bytes(b"\x00")
@@ -74,15 +75,82 @@ def test_download_area_caches_and_skips_voids(tmp_path, monkeypatch):
 
     monkeypatch.setattr(dem_download, "_fetch", fake_fetch)
 
-    out = dem_download.download_area("6.0,45.0,7.9,46.9", dst_dir=tmp_path)
-    assert out == tmp_path
-    # 2x2 cells (lon 6,7 x lat 45,46); none is a void here, all fetched fresh.
-    assert len(fetched) == 4
-    # The pre-seeded tile was not re-downloaded.
+    paths = dem_download.download_area("6.0,45.0,7.9,46.9", dst_dir=tmp_path)
+    # 4 cells - 1 void = 3 returned, all real files under the cache dir.
+    assert len(paths) == 3
+    assert all(p.parent == tmp_path for p in paths)
+    assert cached in paths
+    names = {p.name for p in paths}
+    assert f"{dem_download._tile_basename(Tile(lat=46, lon=7))}.tif" not in names  # void
+    # Only the two missing, non-void cells were fetched; the cached one was not.
+    assert len(fetched) == 2
     assert cached.read_bytes() == b"\x00"
+
+
+def test_download_area_ignores_unrelated_cached_tiles(tmp_path, monkeypatch):
+    """A small bbox must not sweep in tiles a prior larger download cached."""
+    # Simulate leftovers from an earlier whole-country pull in the shared cache.
+    for t in (Tile(lat=40, lon=0), Tile(lat=48, lon=12), Tile(lat=46, lon=7)):
+        (tmp_path / f"{dem_download._tile_basename(t)}.tif").write_bytes(b"\x00")
+
+    def fake_fetch(url, dst):
+        dst.write_bytes(b"\x00")
+        return True
+
+    monkeypatch.setattr(dem_download, "_fetch", fake_fetch)
+
+    paths = dem_download.download_area("6.0,45.0,6.9,45.9", dst_dir=tmp_path)
+    # bbox is the single cell (45,6); the unrelated cached tiles are excluded.
+    assert len(paths) == 1
+    assert paths[0].name == f"{dem_download._tile_basename(Tile(lat=45, lon=6))}.tif"
 
 
 def test_download_area_raises_when_no_tiles_available(tmp_path, monkeypatch):
     monkeypatch.setattr(dem_download, "_fetch", lambda url, dst: False)
     with pytest.raises(TopovertError, match="no Copernicus DEM tiles available"):
         dem_download.download_area("6.0,45.0,6.9,45.9", dst_dir=tmp_path)
+
+
+def test_fetch_retries_transient_failure_then_succeeds(tmp_path, monkeypatch):
+    """A flaky/incomplete read is retried; a later success still lands the tile."""
+    monkeypatch.setattr(dem_download.time, "sleep", lambda _s: None)
+    calls = {"n": 0}
+
+    def flaky_urlretrieve(url, dst):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise urllib.error.ContentTooShortError("incomplete read", None)
+        from pathlib import Path
+        Path(dst).write_bytes(b"\x00")
+
+    monkeypatch.setattr(dem_download.urllib.request, "urlretrieve", flaky_urlretrieve)
+    dst = tmp_path / "tile.tif"
+    assert dem_download._fetch("http://example/tile.tif", dst) is True
+    assert calls["n"] == 2
+    assert dst.read_bytes() == b"\x00"
+    assert not dst.with_suffix(".tif.part").exists()  # no leftover partial
+
+
+def test_fetch_does_not_retry_404(tmp_path, monkeypatch):
+    """A 404 is a definitive 'no such tile' (ocean/void), returned without retry."""
+    monkeypatch.setattr(dem_download.time, "sleep", lambda _s: None)
+    calls = {"n": 0}
+
+    def not_found(url, dst):
+        calls["n"] += 1
+        raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
+
+    monkeypatch.setattr(dem_download.urllib.request, "urlretrieve", not_found)
+    assert dem_download._fetch("http://example/x.tif", tmp_path / "x.tif") is False
+    assert calls["n"] == 1
+
+
+def test_fetch_gives_up_after_retries(tmp_path, monkeypatch):
+    monkeypatch.setattr(dem_download.time, "sleep", lambda _s: None)
+
+    def always_fail(url, dst):
+        raise urllib.error.ContentTooShortError("incomplete read", None)
+
+    monkeypatch.setattr(dem_download.urllib.request, "urlretrieve", always_fail)
+    with pytest.raises(TopovertError, match="after 4 attempts"):
+        dem_download._fetch("http://example/x.tif", tmp_path / "x.tif")

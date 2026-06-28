@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import logging
 import os
-import tempfile
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -102,61 +102,93 @@ def tiles_for_area(area: str) -> list[Tile]:
     return tiles_for_bounds(*parse_area(area))
 
 
+# Network is the flakiest part of a country-scale pull (~730 MB over many tiles),
+# so transient failures — incomplete reads, resets, 5xx — are retried with
+# exponential backoff before giving up. A 404 is definitive (no such tile) and is
+# not retried. Mirrors the retry convention used elsewhere for git/network ops.
+_RETRIES = 4
+_BACKOFF_BASE_S = 2
+
+
 def _fetch(url: str, dst: Path) -> bool:
-    """Download ``url`` to ``dst`` atomically. Returns ``False`` if the tile does
-    not exist (HTTP 404 — an ocean/void cell), raises on any other failure."""
+    """Download ``url`` to ``dst`` atomically, retrying transient failures.
+
+    Returns ``False`` if the tile does not exist (HTTP 404 — an ocean/void cell),
+    raises :class:`TopovertError` if it still fails after :data:`_RETRIES`
+    attempts. The partial download lands in a ``.part`` sidecar and is renamed
+    into place only on a complete transfer, so an interrupted run never leaves a
+    truncated tile that a later run would treat as cached.
+    """
     tmp = dst.with_suffix(dst.suffix + ".part")
-    try:
-        urllib.request.urlretrieve(url, tmp)
-    except urllib.error.HTTPError as exc:
-        tmp.unlink(missing_ok=True)
-        if exc.code == 404:
-            return False
-        raise TopovertError(f"failed to download {url}: HTTP {exc.code}") from exc
-    except OSError as exc:
-        tmp.unlink(missing_ok=True)
-        raise TopovertError(
-            f"failed to download {url}: {exc}\n"
-            "Set TOPOVERT_COPERNICUS_URL to a reachable mirror if needed."
-        ) from exc
-    tmp.replace(dst)
-    return True
+    last = ""
+    for attempt in range(1, _RETRIES + 1):
+        try:
+            urllib.request.urlretrieve(url, tmp)
+        except urllib.error.HTTPError as exc:
+            tmp.unlink(missing_ok=True)
+            if exc.code == 404:
+                return False
+            last = f"HTTP {exc.code}"
+        except OSError as exc:
+            # ContentTooShortError (incomplete read), timeouts, connection
+            # resets — all OSError subclasses, all worth a retry.
+            tmp.unlink(missing_ok=True)
+            last = str(exc)
+        else:
+            tmp.replace(dst)
+            return True
+        if attempt < _RETRIES:
+            delay = _BACKOFF_BASE_S * 2 ** (attempt - 1)
+            log.warning(
+                "download of %s failed (%s); retrying in %ds [%d/%d]",
+                url, last, delay, attempt, _RETRIES,
+            )
+            time.sleep(delay)
+    raise TopovertError(
+        f"failed to download {url} after {_RETRIES} attempts: {last}\n"
+        "Set TOPOVERT_COPERNICUS_URL to a reachable mirror if needed."
+    )
 
 
-def download_area(area: str, dst_dir: Path | None = None) -> Path:
+def download_area(area: str, dst_dir: Path | None = None) -> list[Path]:
     """Download the Copernicus GLO-30 tiles covering ``area`` and return their
-    directory (usable as ``--dem-dir``).
+    file paths (the GeoTIFFs to feed the build).
 
     ``area`` is a named area or a WGS84 bbox (see :func:`parse_area`). Tiles are
     cached in ``dst_dir`` (default: ``<cache>/copernicus-dem-30m``); already
-    present tiles are reused, and ocean cells with no tile are skipped. Raises if
-    the area resolves to no available tile at all.
+    present tiles are reused, and ocean cells with no tile are skipped. Returns
+    only the tiles covering ``area`` — NOT every file in the (shared) cache — so
+    a small bbox build never accidentally pulls in tiles a previous larger
+    download left behind. Raises if the area resolves to no available tile.
     """
     tiles = tiles_for_area(area)
     dst = dst_dir or (cache_dir() / "copernicus-dem-30m")
     dst.mkdir(parents=True, exist_ok=True)
 
+    paths: list[Path] = []
     have, fetched, missing = 0, 0, 0
     for tile in tiles:
         local = dst / f"{_tile_basename(tile)}.tif"
         if local.exists() and local.stat().st_size > 0:
             have += 1
+            paths.append(local)
             continue
         url = tile_url(tile)
         log.info("downloading DEM tile %s ...", _tile_basename(tile))
         if _fetch(url, local):
             fetched += 1
+            paths.append(local)
         else:
             missing += 1
             log.debug("no Copernicus tile for %s (void/ocean cell)", tile.name)
 
     log.info(
         "DEM for %r: %d tile(s) ready (%d downloaded, %d cached, %d void) in %s",
-        area, have + fetched, fetched, have, missing, dst,
+        area, len(paths), fetched, have, missing, dst,
     )
-    if have + fetched == 0:
+    if not paths:
         raise TopovertError(
             f"no Copernicus DEM tiles available for --dem-area {area!r} "
             f"(checked {len(tiles)} cell(s)); is the area over land?"
         )
-    return dst
+    return paths

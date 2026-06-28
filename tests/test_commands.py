@@ -63,6 +63,24 @@ def test_build_img_cmd_single_tile_with_dem():
     assert cmd[-2] == "bounds.osm"
 
 
+def test_build_img_cmd_is_transparent_overlay_by_default():
+    cmd = mkgmap.build_img_cmd(
+        "java", Path("mkgmap.jar"), [Path("c.osm")], Path("out"), map_name="swiss",
+    )
+    # marked transparent so it overlays the device base map, not hides it
+    assert "--transparent" in cmd
+    assert f"--draw-priority={mkgmap.DRAW_PRIORITY}" in cmd
+
+
+def test_build_img_cmd_opaque_when_transparent_false():
+    cmd = mkgmap.build_img_cmd(
+        "java", Path("mkgmap.jar"), [Path("c.osm")], Path("out"),
+        map_name="swiss", transparent=False,
+    )
+    assert "--transparent" not in cmd
+    assert not any(a.startswith("--draw-priority=") for a in cmd)
+
+
 def test_build_img_cmd_style_can_be_disabled():
     cmd = mkgmap.build_img_cmd(
         "java", Path("mkgmap.jar"), [Path("features.osm")], Path("out"),
@@ -82,23 +100,49 @@ def test_build_img_cmd_vector_only_has_no_dem():
 
 
 def test_build_img_cmd_split_tiles_drop_mapname():
-    inputs = [Path("63240001.osm.pbf"), Path("63240002.osm.pbf")]
+    inputs = [Path("63240001.osm.o5m"), Path("63240002.osm.o5m")]
     cmd = mkgmap.build_img_cmd(
         "java", Path("mkgmap.jar"), inputs, Path("out"),
         map_name="swiss", mapname=None,  # tiles carry their own numbers
     )
     assert not any(a.startswith("--mapname=") for a in cmd)
     # tiles precede the TYP, which mkgmap binds last
-    assert cmd[-3:] == ["63240001.osm.pbf", "63240002.osm.pbf", str(mkgmap.TYP_FILE)]
+    assert cmd[-3:] == ["63240001.osm.o5m", "63240002.osm.o5m", str(mkgmap.TYP_FILE)]
 
 
-def test_split_cmd_outputs_pbf_tiles():
+def test_build_img_cmd_max_heap_sets_xmx_before_jar():
+    cmd = mkgmap.build_img_cmd(
+        "java", Path("mkgmap.jar"), [Path("m.osm")], Path("out"),
+        map_name="swiss", max_heap="8g",
+    )
+    # -Xmx must precede -jar (a JVM option, not an mkgmap option)
+    assert cmd[:4] == ["java", "-Xmx8g", "-jar", "mkgmap.jar"]
+
+
+def test_build_img_cmd_no_xmx_by_default():
+    cmd = mkgmap.build_img_cmd(
+        "java", Path("mkgmap.jar"), [Path("m.osm")], Path("out"), map_name="swiss",
+    )
+    assert not any(a.startswith("-Xmx") for a in cmd)
+    assert cmd[:3] == ["java", "-jar", "mkgmap.jar"]
+
+
+def test_split_cmd_max_heap_sets_xmx_before_jar():
+    cmd = splitter.split_cmd(
+        "java", Path("splitter.jar"), Path("f.osm"), Path("split"),
+        max_nodes=1_600_000, mapid="63240001", max_heap="6g",
+    )
+    assert cmd[:4] == ["java", "-Xmx6g", "-jar", "splitter.jar"]
+
+
+def test_split_cmd_outputs_o5m_tiles():
     cmd = splitter.split_cmd(
         "java", Path("splitter.jar"), Path("features.osm"), Path("split"),
         max_nodes=1_600_000, mapid="63240001",
     )
     assert cmd[:3] == ["java", "-jar", "splitter.jar"]
-    assert "--output=pbf" in cmd
+    # o5m, not pbf: dense contour ways overflow PBF's per-block entity cap.
+    assert "--output=o5m" in cmd
     assert "--output-dir=split" in cmd
     assert "--max-nodes=1600000" in cmd
     assert "--mapid=63240001" in cmd

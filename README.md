@@ -82,8 +82,16 @@ uv run topovert render-contours --dem-dir ./swissalti3d_tiles --bbox 8.0,46.55,8
 
 Then copy the `.IMG` to your Garmin device (or load it in BaseCamp) to see the shaded relief.
 Run `topovert build --help` for options (resolution, resampling, source EPSG, `--tlm`/`--tlm-layer`,
-`--contours`/`--contour-interval`, `--no-hillshade`), or `topovert render-contours --help` to
-preview contours for a patch as an SVG.
+`--contours`/`--contour-interval`, `--no-hillshade`, `--max-heap`, `--opaque`), or
+`topovert render-contours --help` to preview contours for a patch as an SVG.
+
+> **The map is a transparent overlay by default**, so it draws *on top of* your device's base map
+> (roads, towns and labels show through between the contours/features) instead of hiding it behind an
+> opaque tile. Pass `--opaque` only if topovert is meant to be your sole base map.
+
+> **Large builds run faster with more JVM heap.** On a country-scale map mkgmap warns that it is
+> throttling to a single job under the default heap; pass e.g. `--max-heap 8g` (sized to your RAM) to
+> let mkgmap/splitter parallelise. It is off by default, so small builds are unaffected.
 
 ## Choosing a DEM source
 
