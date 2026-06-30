@@ -253,10 +253,10 @@ def render_patch(
         from . import dem_download
         dem_download.parse_area(dem_area)  # fail fast on a typo
         log.info("auto-downloading Copernicus GLO-30 DEM for area %r", dem_area)
-        dem_dir = dem_download.download_area(dem_area)
-
-    from .pipeline import _find_geotiffs
-    tifs = _find_geotiffs(dem_dir)
+        tifs = dem_download.download_area(dem_area)
+    else:
+        from .pipeline import _find_geotiffs
+        tifs = _find_geotiffs(dem_dir)
 
     workdir = Path(tempfile.mkdtemp(prefix="topovert-render-", dir=str(out.parent)))
     try:
