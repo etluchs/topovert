@@ -33,6 +33,10 @@ v1 turns freely available Swisstopo data into a Garmin `.IMG`. It is a thin Pyth
   yields a lightweight contour-only map.
 - **Preview contours as an SVG** (`render-contours`): render a patch's contour geometry + elevation
   labels to an SVG you can open in a browser, to check them quickly without building/loading an `.IMG`.
+- **Preview the style as a browser legend** (`legend`): a swatch per rendered element — drawn from the
+  bundled TYP's own colours/widths, annotated with the OSM tags that route to it and the Garmin type
+  code — served with **hot reload** so editing `styles/topovert_typ.txt` or the rule files updates the
+  page live. Tune colours without a full conversion + QMapShack round-trip.
 - A bundled **Swiss topographic style + TYP** colours the output (forest, rock, glacier and water
   fills; red paths; brown contours; Swiss-tuned road/rail rendering) so the map is legible on-device
   out of the box.
@@ -78,12 +82,18 @@ uv run topovert build --dem-area switzerland --contours --no-hillshade --out ./o
 uv run topovert render-contours --dem-area "8.0,46.55,8.1,46.65" --out ./out/patch.svg
 uv run topovert render-contours --dem-dir ./swissalti3d_tiles --bbox 8.0,46.55,8.1,46.65 \
     --out ./out/patch.svg
+
+# Fine-tune the style: serve a live legend of every element (swatch + tags + type
+# code) and edit styles/topovert_typ.txt — the browser hot-reloads on save.
+uv run topovert legend                         # http://127.0.0.1:8000 (Ctrl-C to stop)
+uv run topovert legend --out ./out/legend.html # or a standalone HTML file, no server
 ```
 
 Then copy the `.IMG` to your Garmin device (or load it in BaseCamp) to see the shaded relief.
 Run `topovert build --help` for options (resolution, resampling, source EPSG, `--tlm`/`--tlm-layer`,
-`--contours`/`--contour-interval`, `--no-hillshade`, `--max-heap`, `--opaque`), or
-`topovert render-contours --help` to preview contours for a patch as an SVG.
+`--contours`/`--contour-interval`, `--no-hillshade`, `--max-heap`, `--opaque`),
+`topovert render-contours --help` to preview contours for a patch as an SVG, or
+`topovert legend --help` to preview/tune the style in a browser.
 
 > **The map is a transparent overlay by default**, so it draws *on top of* your device's base map
 > (roads, towns and labels show through between the contours/features) instead of hiding it behind an

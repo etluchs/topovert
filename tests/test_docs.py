@@ -57,6 +57,21 @@ def test_readme_python_pin_matches_pyproject():
     )
 
 
+def test_every_subcommand_is_documented_in_readme():
+    """Each CLI subcommand (build/render-contours/legend/…) must appear in the README."""
+    parser = cli._build_parser()
+    subactions = [
+        a for a in parser._actions if isinstance(a, argparse._SubParsersAction)
+    ]
+    names = {name for a in subactions for name in a.choices}
+    assert names, "no subcommands found"
+    missing = {n for n in names if f"topovert {n}" not in _README}
+    assert not missing, (
+        f"README doesn't document these subcommands: {sorted(missing)}. "
+        "Add a usage line for them."
+    )
+
+
 def test_tlm_input_is_a_geodatabase_not_geopackage():
     """swissTLM3D is a .gdb GeoDatabase; the .gpkg label was a long-lived bug."""
     for name, text in (("README.md", _README), ("cli.py", _CLI_SRC)):
