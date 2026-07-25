@@ -354,24 +354,63 @@ def _label_from_tags(tags: list[tuple[str, int | None]], type_code: int) -> str:
 # --------------------------------------------------------------------------- #
 # Swatch + HTML rendering
 # --------------------------------------------------------------------------- #
-_SWATCH_W = 120
+_SWATCH_W = 160
 _SWATCH_H = 34
 
+# Px per bitmap pixel. Garmin line patterns are 32 wide and a few tall, so lines
+# are drawn at 2x (a 2 px bitmap -> a 4 px line, matching the `LineWidth * 2`
+# used for solid lines); area hatches are typically 32x32 and draw 1:1 so a whole
+# tile fits the swatch height. Both *tile* rather than stretch — stretching one
+# period across the swatch exaggerates the dash spacing several-fold and makes
+# the swatch useless for judging a dash pattern.
+_LINE_CELL = 2
+_AREA_CELL = 1
 
-def _xpm_pattern_svg(xpm: Xpm, w: int, h: int) -> str:
-    """Render an Xpm bitmap as a tiled grid of rects filling ``w``x``h``."""
-    cw = w / xpm.width
-    ch = h / xpm.height
+
+def _xpm_tiles_svg(xpm: Xpm, *, cell: float, width: float, height: float) -> str:
+    """Tile ``xpm`` at ``cell`` px per bitmap pixel to fill ``width`` x ``height``.
+
+    The pattern repeats at its true aspect ratio (as the device repeats it along a
+    line / across an area) and is clipped at the box edges. Horizontal runs of one
+    colour merge into a single rect, so a 10-px dash is one rect, not ten.
+    """
+    if not xpm.pixels or xpm.width <= 0 or xpm.height <= 0:
+        return ""
+    tile_w = xpm.width * cell
+    tile_h = xpm.height * cell
     rects: list[str] = []
-    for ry, row in enumerate(xpm.pixels):
-        for cx, idx in enumerate(row):
-            colour = xpm.colours[idx] if idx < len(xpm.colours) else None
-            if not colour:
-                continue
-            rects.append(
-                f'<rect x="{cx * cw:.2f}" y="{ry * ch:.2f}" '
-                f'width="{cw:.2f}" height="{ch:.2f}" fill="{colour}"/>'
-            )
+    y = 0.0
+    while y < height - 1e-9:
+        for ry, row in enumerate(xpm.pixels):
+            ry_top = y + ry * cell
+            if ry_top >= height - 1e-9:
+                break
+            rh = min(cell, height - ry_top)
+            # Run-length merge this row, then repeat the row across the width.
+            runs: list[tuple[int, int, str]] = []  # (start_col, span, colour)
+            col = 0
+            while col < len(row):
+                idx = row[col]
+                span = 1
+                while col + span < len(row) and row[col + span] == idx:
+                    span += 1
+                colour = xpm.colours[idx] if idx < len(xpm.colours) else None
+                if colour:
+                    runs.append((col, span, colour))
+                col += span
+            x0 = 0.0
+            while x0 < width - 1e-9:
+                for start, span, colour in runs:
+                    rx = x0 + start * cell
+                    if rx >= width - 1e-9:
+                        break
+                    rw = min(span * cell, width - rx)
+                    rects.append(
+                        f'<rect x="{rx:.2f}" y="{ry_top:.2f}" '
+                        f'width="{rw:.2f}" height="{rh:.2f}" fill="{colour}"/>'
+                    )
+                x0 += tile_w
+        y += tile_h
     return "".join(rects)
 
 
@@ -396,7 +435,10 @@ def _swatch_svg(row: LegendRow) -> str:
 
     if row.group == "polygon":
         if el.xpm.pixels:
-            body = _xpm_pattern_svg(el.xpm, w, h)
+            # Hatch/pattern fill: tile it at 1:1 over a light ground.
+            body = f'<rect width="{w}" height="{h}" fill="#fbf8f2"/>' + _xpm_tiles_svg(
+                el.xpm, cell=_AREA_CELL, width=w, height=h
+            )
         else:
             body = f'<rect width="{w}" height="{h}" fill="{el.xpm.primary or "#ccc"}"/>'
         body += f'<rect width="{w}" height="{h}" fill="none" stroke="#999" stroke-width="1"/>'
@@ -413,9 +455,14 @@ def _swatch_svg(row: LegendRow) -> str:
                 f'stroke="{el.xpm.colours[1]}" stroke-width="{width + el.border_width*2}"/>'
             )
         if el.xpm.pixels:
-            # Dash/pattern line: tile the bitmap along a strip.
-            strip = _xpm_pattern_svg(el.xpm, w - 12, max(width, 4))
-            body = f'<g transform="translate(6,{y - max(width,4)/2})">{strip}</g>'
+            # Dash/pattern line: repeat the bitmap along the strip at true scale,
+            # so the dash period on screen matches the pattern (mkgmap ignores
+            # LineWidth once a bitmap is present — the Xpm height is the width).
+            strip_h = el.xpm.height * _LINE_CELL
+            strip = _xpm_tiles_svg(
+                el.xpm, cell=_LINE_CELL, width=w - 12, height=strip_h
+            )
+            body = f'<g transform="translate(6,{y - strip_h / 2:.2f})">{strip}</g>'
         else:
             body = (
                 border
@@ -427,8 +474,11 @@ def _swatch_svg(row: LegendRow) -> str:
     # point
     colour = el.xpm.primary or "#c0392b"
     if el.xpm.pixels:
-        body = _xpm_pattern_svg(el.xpm, min(el.xpm.width, h), min(el.xpm.height, h))
-        body = f'<g transform="translate({w/2 - h/2},1)">{body}</g>'
+        # Icon: draw the bitmap once at 1:1, centred (no tiling).
+        icon_w = el.xpm.width * _AREA_CELL
+        icon_h = el.xpm.height * _AREA_CELL
+        body = _xpm_tiles_svg(el.xpm, cell=_AREA_CELL, width=icon_w, height=icon_h)
+        body = f'<g transform="translate({w/2 - icon_w/2:.2f},{h/2 - icon_h/2:.2f})">{body}</g>'
     else:
         body = f'<circle cx="{w/2}" cy="{h/2}" r="6" fill="{colour}" stroke="#333" stroke-width="1"/>'
     return open_tag + '<rect width="100%" height="100%" fill="#fbf8f2"/>' + body + "</svg>"

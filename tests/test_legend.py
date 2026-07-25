@@ -1,5 +1,9 @@
 """Tests for the style-legend renderer (pure parsing + HTML, no network)."""
 
+import re
+
+import pytest
+
 from topovert import legend, mkgmap
 
 
@@ -124,6 +128,61 @@ def test_build_legend_covers_every_bundled_element():
     assert ("point", 0x6616) in types  # summit cross POI
     # Every row has a non-empty label.
     assert all(r.label for r in rows)
+
+
+# --------------------------------------------------------------------------- #
+# Bitmap (dashed / hatched) swatch rendering
+# --------------------------------------------------------------------------- #
+def test_xpm_tiles_repeat_at_true_scale_and_merge_runs():
+    """A dash bitmap tiles at its real period; runs merge into one rect each.
+
+    Stretching a single period across the swatch (the original bug) exaggerated
+    the dash spacing several-fold, which defeats the point of previewing a dash.
+    """
+    xpm = legend.Xpm(
+        width=8, height=1, colours=["#ff0000", None],
+        pixels=[[0, 0, 0, 0, 1, 1, 1, 1]],  # 4 on, 4 off
+    )
+    svg = legend._xpm_tiles_svg(xpm, cell=2, width=32, height=2)
+    rects = re.findall(r'<rect x="([0-9.]+)" y="[0-9.]+" width="([0-9.]+)"', svg)
+    # 8-px pattern at 2x = a 16-px tile -> exactly 2 tiles across 32 px.
+    assert len(rects) == 2, rects
+    assert [x for x, _ in rects] == ["0.00", "16.00"]
+    # each 4-px run merges into one 8-px rect (not 4 rects of 2 px)
+    assert [w for _, w in rects] == ["8.00", "8.00"]
+    # the `none` gap colour is never painted
+    assert "none" not in svg
+
+
+def test_xpm_tiles_clip_at_the_box_edge():
+    xpm = legend.Xpm(width=4, height=1, colours=["#00ff00"], pixels=[[0, 0, 0, 0]])
+    svg = legend._xpm_tiles_svg(xpm, cell=2, width=10, height=2)
+    widths = [float(w) for w in re.findall(r'width="([0-9.]+)"', svg)]
+    assert sum(widths) == 10.0  # fills exactly, no overflow past the box
+
+
+def test_dashed_line_swatch_renders_multiple_dashes():
+    """The bundled dashed Wanderweg (0x16) draws as repeated dashes, not a bar."""
+    rows = {(r.group, r.type_code): r for r in legend.build_legend()}
+    wanderweg = rows[("line", 0x16)]
+    assert wanderweg.element is not None  # NOT the 'Garmin default' bucket
+    xpm = wanderweg.element.xpm
+    if not xpm.pixels:
+        pytest.skip("bundled Wanderweg is currently a solid line")
+    svg = legend._swatch_svg(wanderweg)
+    rects = re.findall(r'<rect x="([0-9.]+)"[^/]*?width="([0-9.]+)"', svg)
+    dashes = [r for r in rects if r[0] != "0.00" or float(r[1]) < 100]
+    assert len(dashes) > 2, "expected several repeated dashes"
+    assert xpm.primary in svg.lower()
+
+
+def test_solid_line_swatch_is_a_single_stroke():
+    """A solid (no-bitmap) line still renders as one <line>, not a tile grid."""
+    rows = {(r.group, r.type_code): r for r in legend.build_legend()}
+    feldweg = rows[("line", 0x0A)]  # Feldweg stays solid
+    svg = legend._swatch_svg(feldweg)
+    assert svg.count("<line") == 1
+    assert "<rect" in svg  # just the background
 
 
 # --------------------------------------------------------------------------- #
