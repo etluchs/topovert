@@ -40,13 +40,42 @@ v1 turns freely available Swisstopo data into a Garmin `.IMG`. It is a thin Pyth
 - A bundled **Swiss topographic style + TYP** colours the output (forest, rock, glacier and water
   fills; red paths; brown contours; Swiss-tuned road/rail rendering) so the map is legible on-device
   out of the box.
+- **Prebuilt Switzerland maps as downloads**: a contour-only and a contours+hillshade `.IMG` are
+  built in CI and attached to a GitHub Release, so the common case needs no local toolchain at all.
 - **Auto-download the DEM for an area** (`--dem-area`): instead of supplying local tiles, name an
   area (`switzerland`) or a WGS84 bbox and topovert fetches the covering **Copernicus GLO-30**
   (~30 m) GeoTIFF tiles into a cache and builds from them. All of Switzerland is 18 tiles (~730 MB).
 
 Full **swissTLM3D / swissALTI3D STAC** area selection is the planned next step.
 
+## Download a prebuilt Switzerland map
+
+Don't want to install GDAL and Java? Grab a ready-made map from the
+[Releases page](../../releases) and skip everything below:
+
+| File | Contents | Size | Best for |
+|---|---|---|---|
+| `topovert-switzerland-contours.img` | Contour lines (20 m, every 5th a bold index line) | small | **Devices** (Fenix, Edge, …) |
+| `topovert-switzerland-contours-hillshade.img` | The same contours **plus** an embedded country-wide DEM for shaded relief | large | **Desktop** (QMapShack / BaseCamp) |
+
+Copy the `.img` into your device's `Garmin/` folder and restart it. Both are
+transparent overlays built from the open Copernicus GLO-30 DEM, so they draw on
+top of your existing base map.
+
+> [!WARNING]
+> **Check the hillshade map on the desktop before putting it on a device.** It
+> embeds a whole-country DEM across many map tiles, and a comparable
+> whole-Switzerland map crashed a Garmin Edge 1040 badly enough to require a full
+> device reset (`topovert-qg3`, cause not yet isolated). For devices, prefer the
+> contour-only file.
+
+These prebuilt maps are DEM-derived only — **no roads, buildings, land cover or
+POIs**, since those need the large manual swissTLM3D download. For a map with
+vector features, build it yourself with `--tlm` as shown below.
+
 ## Requirements
+
+Only needed if you're building maps yourself (the prebuilt downloads above need none of this):
 
 - Python ≥ 3.11
 - GDAL command-line tools (with the SRTMHGT driver) on `PATH`

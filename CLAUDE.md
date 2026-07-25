@@ -18,7 +18,9 @@ hillshade-only map. Large extents (up to whole-country) are tiled with **splitte
 contours as an SVG (for checking geometry + elevation labels without building an `.IMG`). A
 `legend` command previews the bundled style + TYP as a browser-viewable legend (one swatch per
 rendered element) and hot-reloads as you edit the style files, so colours/widths can be tuned
-without a full conversion. Full
+without a full conversion. Prebuilt whole-Switzerland maps (contour-only and contours+hillshade,
+both DEM-only — no swissTLM3D vectors, which CI can't fetch) are built by
+`.github/workflows/release-maps.yml` and attached to a GitHub Release as downloads. Full
 swissTLM3D/swissALTI3D STAC area selection is still deferred (`bd show topovert-y8s`).
 
 ## Keep the docs in sync
@@ -183,6 +185,25 @@ sources with `TOPOVERT_MKGMAP_URL` / `TOPOVERT_SPLITTER_URL`.
   no automated substitute for the final visual check — load the result in QMapShack/on a device.
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:7510c1e2 -->
+## Releasing prebuilt maps
+
+`.github/workflows/release-maps.yml` builds the downloadable Switzerland maps (matrix:
+`--contours --no-hillshade` and `--contours`) and attaches them to a GitHub Release. It is
+**never** triggered by a normal push — dispatch it manually with a `tag`, or push a `maps-*` tag.
+Notes:
+
+- **Smoke-test with the `area` input** set to a small bbox (e.g. `8.0,46.55,8.1,46.65`) before
+  running the real `switzerland` build; the whole-country contour run is hours long and writes
+  tens of millions of nodes, so a typo is expensive. The workflow frees ~25 GB of runner disk and
+  passes `--work-dir "$RUNNER_TEMP/work"`; if it still runs out, raise `contour_interval`.
+- **Releases stay drafts** unless a dispatch explicitly passes `draft: false` (a tag push has no
+  `inputs`, and an unset input compares equal to `false` in GitHub expressions — hence the explicit
+  `github.event_name` check in the `publish` job). Verify in QMapShack before undrafting.
+- **The hillshade artifact is not cleared for on-device use** — see `topovert-qg3` (a comparable
+  whole-CH map with an embedded DEM forced an Edge 1040 reset). `.github/release-notes-maps.md`
+  and the README carry that warning; keep it there until qg3 is resolved.
+- GitHub caps a release asset at **2 GB**; the workflow fails the build if an `.img` exceeds it.
+
 ## Beads Issue Tracker
 
 This project uses **bd (beads)** for issue tracking. Run `bd prime` to see full workflow context and commands.

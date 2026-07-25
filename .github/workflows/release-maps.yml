@@ -1,0 +1,196 @@
+name: Build release maps
+
+# Builds the prebuilt Switzerland maps offered as GitHub downloads and attaches
+# them to a Release: a lightweight contour-only map and a contours + hillshade
+# map (the latter embeds the whole-country DEM, so it is much larger).
+#
+# Both are DEM-derived only. swissTLM3D vector features are deliberately absent:
+# the .gdb is a large manual swisstopo download that CI can't fetch (STAC area
+# selection is topovert-y8s), so roads/land cover are not in these artifacts.
+#
+# The build is heavy (a whole-country contour run is tens of millions of nodes),
+# so it never runs on push — dispatch it manually, or push a `maps-*` tag. Use
+# the `area` input with a small bbox first to smoke-test the workflow cheaply.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to create/update (e.g. maps-2026.07)"
+        required: true
+        type: string
+      area:
+        description: "DEM area: 'switzerland' or a WGS84 bbox min_lon,min_lat,max_lon,max_lat (use a small bbox to smoke-test)"
+        default: switzerland
+        type: string
+      contour_interval:
+        description: "Contour spacing in metres (raise it if the build runs out of disk)"
+        default: "20"
+        type: string
+      max_heap:
+        description: "JVM -Xmx for mkgmap/splitter (runner has 16 GB)"
+        default: "10g"
+        type: string
+      draft:
+        description: "Keep the release as a draft (recommended until verified in QMapShack)"
+        default: true
+        type: boolean
+  push:
+    tags:
+      - "maps-*"
+
+permissions:
+  contents: write
+
+env:
+  # Tag/area/knobs resolve from the dispatch inputs, or fall back to tag-push defaults.
+  TAG: ${{ inputs.tag || github.ref_name }}
+  AREA: ${{ inputs.area || 'switzerland' }}
+  CONTOUR_INTERVAL: ${{ inputs.contour_interval || '20' }}
+  MAX_HEAP: ${{ inputs.max_heap || '10g' }}
+
+jobs:
+  prepare:
+    name: Create draft release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create or reuse the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; assets will be replaced."
+          else
+            gh release create "$TAG" \
+              --title "Switzerland maps ($TAG)" \
+              --notes-file .github/release-notes-maps.md \
+              --draft
+          fi
+
+  build:
+    name: ${{ matrix.name }}
+    needs: prepare
+    runs-on: ubuntu-latest
+    # A whole-country contour build is long; stay under the 6 h job ceiling.
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: contours (no hillshade)
+            slug: contours
+            # Contour lines only: no embedded DEM, so a small file. This is the
+            # variant recommended for devices (see topovert-qg3).
+            extra_flags: "--no-hillshade"
+          - name: contours + hillshade
+            slug: contours-hillshade
+            # Embeds the whole-country DEM for shaded relief -> large .IMG.
+            extra_flags: ""
+    steps:
+      - uses: actions/checkout@v4
+
+      # A whole-country contour run writes very large intermediates (the OSM for
+      # 20 m contours over Switzerland is tens of millions of nodes). The stock
+      # runner image leaves little headroom, so drop toolchains we don't use.
+      - name: Free up disk space
+        run: |
+          set -euo pipefail
+          echo "before:"; df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/.ghcup /opt/hostedtoolcache/CodeQL \
+                      /usr/local/share/boost || true
+          sudo docker image prune --all --force >/dev/null 2>&1 || true
+          echo "after:"; df -h /
+
+      - name: Install GDAL CLI
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends gdal-bin
+          gdalinfo --version
+          # The DEM/hillshade path needs the SRTMHGT driver; fail early if absent.
+          gdalinfo --formats | grep -q SRTMHGT
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+
+      # The Copernicus GLO-30 tiles (~730 MB for Switzerland) and the
+      # mkgmap/splitter jars both live here; caching skips the re-download.
+      - name: Cache DEM tiles and jars
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/topovert
+          key: topovert-cache-${{ env.AREA }}-v1
+
+      - name: Sync environment
+        run: uv sync
+
+      - name: Build map
+        run: |
+          set -euo pipefail
+          mkdir -p out "$RUNNER_TEMP/work"
+          uv run topovert -v build \
+            --dem-area "$AREA" \
+            --contours \
+            --contour-interval "$CONTOUR_INTERVAL" \
+            ${{ matrix.extra_flags }} \
+            --max-heap "$MAX_HEAP" \
+            --work-dir "$RUNNER_TEMP/work" \
+            --name "topovert Switzerland" \
+            --out "out/topovert-switzerland-${{ matrix.slug }}.img"
+          ls -lh out/
+
+      - name: Checksum
+        working-directory: out
+        run: |
+          sha256sum "topovert-switzerland-${{ matrix.slug }}.img" \
+            > "topovert-switzerland-${{ matrix.slug }}.img.sha256"
+
+      # GitHub caps a single release asset at 2 GB. Fail loudly here rather than
+      # part-way through an upload.
+      - name: Check asset size
+        working-directory: out
+        run: |
+          set -euo pipefail
+          bytes=$(stat -c%s "topovert-switzerland-${{ matrix.slug }}.img")
+          echo "asset is $((bytes / 1024 / 1024)) MiB"
+          if [ "$bytes" -gt $((2 * 1024 * 1024 * 1024)) ]; then
+            echo "::error::asset exceeds GitHub's 2 GB release-asset limit"
+            exit 1
+          fi
+
+      - name: Upload to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        working-directory: out
+        run: |
+          gh release upload "$TAG" \
+            "topovert-switzerland-${{ matrix.slug }}.img" \
+            "topovert-switzerland-${{ matrix.slug }}.img.sha256" \
+            --clobber
+
+  publish:
+    name: Publish release
+    needs: build
+    # Only leaves draft state when a dispatch explicitly asks for it. A tag push
+    # has no `inputs`, and an unset input compares equal to false in GitHub
+    # expressions — hence the explicit event check, so a tag push stays a draft
+    # and the maps get checked in QMapShack before anyone can download them.
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.draft == false }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Undraft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$TAG" --draft=false

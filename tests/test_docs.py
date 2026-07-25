@@ -72,6 +72,55 @@ def test_every_subcommand_is_documented_in_readme():
     )
 
 
+_RELEASE_WF = _ROOT / ".github" / "workflows" / "release-maps.yml"
+_RELEASE_NOTES = _ROOT / ".github" / "release-notes-maps.md"
+
+
+def test_release_asset_names_match_the_docs():
+    """The .img names the release workflow builds must be the ones we advertise.
+
+    Renaming an asset without updating the README/release notes would point every
+    download link at a file that doesn't exist.
+    """
+    wf = _RELEASE_WF.read_text(encoding="utf-8")
+    notes = _RELEASE_NOTES.read_text(encoding="utf-8")
+    slugs = set(re.findall(r"slug:\s*([\w-]+)", wf))
+    assert slugs, "no matrix slugs found in the release workflow"
+    for slug in slugs:
+        asset = f"topovert-switzerland-{slug}.img"
+        assert asset in _README, f"README doesn't mention the {asset} download"
+        assert asset in notes, f"release notes don't mention {asset}"
+
+
+def test_release_workflow_is_not_triggered_by_ordinary_pushes():
+    """A whole-country build is hours long: it must be tag/dispatch only.
+
+    A `branches:` push trigger here would kick off a multi-hour country-scale
+    build (and a release upload) on every commit.
+    """
+    wf = _RELEASE_WF.read_text(encoding="utf-8")
+    triggers = wf.split("jobs:", 1)[0]
+    assert "workflow_dispatch:" in triggers
+    assert "branches:" not in triggers, (
+        "release-maps.yml must not run on branch pushes; keep it tag/dispatch only"
+    )
+
+
+def test_hillshade_download_carries_the_device_warning():
+    """topovert-qg3: the whole-CH DEM map is not cleared for on-device use.
+
+    Until that bug is resolved, both the README and the release notes must warn
+    people before they load the hillshade artifact onto a device.
+    """
+    for name, text in (
+        ("README.md", _README),
+        ("release-notes-maps.md", _RELEASE_NOTES.read_text(encoding="utf-8")),
+    ):
+        assert "topovert-qg3" in text, f"{name} lost the qg3 reference"
+        # whitespace-tolerant: the warning wraps across lines in both files
+        assert re.search(r"(?i)edge\s+1040", text), f"{name} lost the crash warning"
+
+
 def test_tlm_input_is_a_geodatabase_not_geopackage():
     """swissTLM3D is a .gdb GeoDatabase; the .gpkg label was a long-lived bug."""
     for name, text in (("README.md", _README), ("cli.py", _CLI_SRC)):
