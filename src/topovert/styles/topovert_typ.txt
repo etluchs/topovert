@@ -3,7 +3,8 @@
 ; this text TYP when it is passed on the command line; FID/ProductCode MUST match
 ; mkgmap's --family-id / --product-id (see src/topovert/mkgmap.py) or the device
 ; ignores it. Solid fills/lines use the "0 0 1 0" Xpm form (one colour, no
-; bitmap). Labels are ASCII (no umlauts) to stay safe under CodePage 1252.
+; bitmap); a real bitmap (e.g. the dashed Wanderweg 0x16 below) uses a 32-wide Xpm
+; with a `none` gap colour. Labels are ASCII (no umlauts) to stay safe under CodePage 1252.
 
 [_id]
 FID=6324
@@ -82,13 +83,20 @@ Xpm="0 0 1 0"
 [end]
 
 ; --- Lines ------------------------------------------------------------------
+; Wanderweg = 1m Weg / footpath: DASHED (mirrors swisstopo's dashed hiking-trail
+; line, and marks the cyclist's "OK for MTB" side of the MTB-vs-gravel threshold).
+; The wider drivable Forststrasse (Feldweg, 0x0a below) stays solid. For a line
+; bitmap mkgmap fixes width at 32 and reads the Xpm *height* as the line width in
+; px; the second colour `none` is the transparent gap that makes the dashes.
+; LineWidth/BorderWidth are ignored once a bitmap is present.
 [_line]
 Type=0x16
 String1=0x04,Wanderweg
-Xpm="0 0 1 0"
-"1 c #E03028"
-LineWidth=2
-BorderWidth=0
+Xpm="32 2 2 1"
+"a c #E03028"
+"b c none"
+"aaaaaaaaaabbbbbbaaaaaaaaaabbbbbb"
+"aaaaaaaaaabbbbbbaaaaaaaaaabbbbbb"
 [end]
 
 [_line]
