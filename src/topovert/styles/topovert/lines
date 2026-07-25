@@ -20,7 +20,7 @@ highway=residential   [0x06 road_class=0 road_speed=2 resolution 22]
 highway=service       [0x07 road_class=0 road_speed=2 resolution 22]
 highway=road          [0x06 road_class=0 road_speed=2 resolution 22]
 highway=track         [0x0a road_class=0 road_speed=1 resolution 22]
-highway=path          [0x16 road_class=0 road_speed=0 resolution 24]
+highway=path          [0x16 road_class=0 road_speed=0 resolution 22]
 
 # --- Railways & aerialways ---------------------------------------------------
 railway=narrow_gauge  [0x14 resolution 20]
