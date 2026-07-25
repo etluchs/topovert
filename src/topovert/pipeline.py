@@ -10,7 +10,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import TopovertError
-from . import contour, dem_download, gdal_tools, jars, mkgmap, osm, splitter, vector
+from . import (
+    contour, dem_download, gdal_tools, jars, mkgmap, osm, splitter, tlm_download, vector,
+)
 from .hgt import DEFAULT_RESOLUTION, DEM_RESOLUTIONS, tiles_for_bounds
 
 log = logging.getLogger(__name__)
@@ -55,6 +57,7 @@ def build(
     source_epsg: int | None = None,
     map_name: str = "topovert",
     tlm_path: Path | None = None,
+    tlm_release: str | None = None,
     tlm_layers: list[str] | None = None,
     contours: bool = False,
     contour_interval: int = contour.DEFAULT_INTERVAL,
@@ -69,8 +72,12 @@ def build(
 
     The DEM source is either a local ``dem_dir`` of GeoTIFFs or ``dem_area`` (a
     named area or WGS84 bbox) whose Copernicus GLO-30 tiles are auto-downloaded
-    into a cache and used in its place — pass at most one. At least one of a DEM
-    source / ``tlm_path`` is required. Steps: preflight ->
+    into a cache and used in its place — pass at most one. The vector source is
+    likewise either a local ``tlm_path`` (a swissTLM3D ``.gdb``) or
+    ``tlm_release`` (``"latest"`` or a release id), which downloads the national
+    swissTLM3D GeoDatabase from swisstopo's STAC API into the cache — again at
+    most one. At least one of a DEM source / a vector source is required.
+    Steps: preflight ->
     bounds (from the DEM mosaic, else from the TLM extent) -> optional per-tile
     HGT -> OSM (bounds-only, swissTLM3D vector features, and/or DEM contours) ->
     splitter when the OSM is large -> mkgmap (``--dem`` when a DEM is present) ->
@@ -97,15 +104,23 @@ def build(
             "pass either --dem-dir (local tiles) or --dem-area (auto-download), "
             "not both"
         )
+    if tlm_path is not None and tlm_release is not None:
+        raise TopovertError(
+            "pass either --tlm (local .gdb) or --tlm-release (auto-download), "
+            "not both"
+        )
     have_dem = dem_dir is not None or dem_area is not None
-    if not have_dem and tlm_path is None:
-        raise TopovertError("nothing to build: pass --dem-dir, --dem-area and/or --tlm")
+    have_tlm = tlm_path is not None or tlm_release is not None
+    if not have_dem and not have_tlm:
+        raise TopovertError(
+            "nothing to build: pass --dem-dir, --dem-area, --tlm and/or --tlm-release"
+        )
     if contours and not have_dem:
         raise TopovertError(
             "--contours needs a DEM (--dem-dir or --dem-area): contours are "
             "derived from the elevation data"
         )
-    if have_dem and not hillshade and not contours and tlm_path is None:
+    if have_dem and not hillshade and not contours and not have_tlm:
         raise TopovertError(
             "--no-hillshade with only a DEM leaves an empty map: add --contours "
             "and/or --tlm, or drop --no-hillshade"
@@ -132,6 +147,11 @@ def build(
     else:
         tifs = []
     layers = tlm_layers or list(vector.DEFAULT_TLM_LAYERS)
+    # swissTLM3D is published as one national FileGDB per release, so the
+    # download is whole-country regardless of the DEM area (see tlm_download).
+    if tlm_release is not None:
+        log.info("auto-downloading swissTLM3D release %r", tlm_release)
+        tlm_path = tlm_download.download_release(tlm_release)
     if tlm_path is not None:
         tlm_path = tlm_path.resolve()
         if not tlm_path.exists():

@@ -42,6 +42,9 @@ v1 turns freely available Swisstopo data into a Garmin `.IMG`. It is a thin Pyth
   out of the box.
 - **Prebuilt Switzerland maps as downloads**: a contour-only and a contours+hillshade `.IMG` are
   built in CI and attached to a GitHub Release, so the common case needs no local toolchain at all.
+- **Auto-download swissTLM3D** (`--tlm-release`): fetch the national vector GeoDatabase straight from
+  swisstopo's open-data STAC API instead of downloading it by hand — `latest`, or a pinned release id
+  for reproducible builds. It's a ~2.9 GB download (≈10 GB extracted), cached under `~/.cache/topovert`.
 - **Auto-download the DEM for an area** (`--dem-area`): instead of supplying local tiles, name an
   area (`switzerland`) or a WGS84 bbox and topovert fetches the covering **Copernicus GLO-30**
   (~30 m) GeoTIFF tiles into a cache and builds from them. All of Switzerland is 18 tiles (~730 MB).
@@ -96,6 +99,11 @@ uv run topovert build --dem-dir ./swissalti3d_tiles \
 # Vector-only (no DEM); large extents are tiled with splitter automatically
 uv run topovert build --tlm ./SWISSTLM3D_CHLV95LN02.gdb --out ./out/swiss.img
 
+# No local swissTLM3D? Auto-download it from swisstopo's STAC API (~2.9 GB,
+# cached). 'latest' takes the newest release; pin an id for a reproducible build.
+uv run topovert build --tlm-release latest --dem-area switzerland --contours \
+    --out ./out/swiss-full.img
+
 # Add elevation contour lines from the DEM (20 m spacing by default)
 uv run topovert build --dem-dir ./swissalti3d_tiles --contours --out ./out/swiss.img
 
@@ -119,7 +127,8 @@ uv run topovert legend --out ./out/legend.html # or a standalone HTML file, no s
 ```
 
 Then copy the `.IMG` to your Garmin device (or load it in BaseCamp) to see the shaded relief.
-Run `topovert build --help` for options (resolution, resampling, source EPSG, `--tlm`/`--tlm-layer`,
+Run `topovert build --help` for options (resolution, resampling, source EPSG,
+`--tlm`/`--tlm-release`/`--tlm-layer`,
 `--contours`/`--contour-interval`, `--no-hillshade`, `--max-heap`, `--opaque`),
 `topovert render-contours --help` to preview contours for a patch as an SVG, or
 `topovert legend --help` to preview/tune the style in a browser.

@@ -78,6 +78,13 @@ def _build_parser() -> argparse.ArgumentParser:
              "(roads, water, buildings); omit for a hillshade-only map",
     )
     b.add_argument(
+        "--tlm-release", default=None, metavar="RELEASE",
+        help="auto-download swissTLM3D from swisstopo instead of --tlm: "
+             "'latest' or a release id (e.g. swisstlm3d_2025-03). This is a "
+             "~2.9 GB national download (expands to ~10 GB) cached under "
+             "~/.cache/topovert. Mutually exclusive with --tlm",
+    )
+    b.add_argument(
         "--tlm-layer", dest="tlm_layers", action="append", default=None,
         metavar="LAYER",
         help="swissTLM3D layer to include (repeatable); overrides the default "
@@ -210,6 +217,7 @@ def _cmd_build(args: argparse.Namespace) -> int:
         source_epsg=args.source_epsg,
         map_name=args.name,
         tlm_path=args.tlm,
+        tlm_release=args.tlm_release,
         tlm_layers=args.tlm_layers,
         contours=args.contours,
         contour_interval=args.contour_interval,
@@ -225,7 +233,7 @@ def _cmd_build(args: argparse.Namespace) -> int:
         feats.append(f"hillshade, {len(result.tiles)} DEM tile(s)")
     if args.contours:
         feats.append("contours")
-    if args.tlm:
+    if args.tlm or args.tlm_release:
         feats.append("vector features")
     summary = "; ".join(feats) if feats else "bounds only"
     print(f"Wrote {result.out_path} ({summary}).")

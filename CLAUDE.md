@@ -14,7 +14,8 @@ buildings, POIs, and walls. `--contours` adds elevation contour lines derived fr
 Either input is optional: `--tlm` alone makes a **vector-only** map (no DEM), `--dem-dir` alone a
 hillshade-only map. Large extents (up to whole-country) are tiled with **splitter** automatically.
 `--dem-area <name|bbox>` (e.g. `switzerland`) auto-downloads the covering **Copernicus GLO-30**
-(~30 m) DEM tiles in place of `--dem-dir`. A separate `render-contours` command previews a patch's
+(~30 m) DEM tiles in place of `--dem-dir`; `--tlm-release <latest|id>` likewise auto-downloads the
+national **swissTLM3D** GeoDatabase from swisstopo's STAC API in place of `--tlm`. A separate `render-contours` command previews a patch's
 contours as an SVG (for checking geometry + elevation labels without building an `.IMG`). A
 `legend` command previews the bundled style + TYP as a browser-viewable legend (one swatch per
 rendered element) and hot-reloads as you edit the style files, so colours/widths can be tuned
@@ -72,7 +73,8 @@ writer + node/way serializers + `assemble_osm`), `vector.py` (swissTLM3D → Geo
 `TAG_MAP`, bounds), `contour.py` (DEM → `gdal_contour` → OSM contour ways), `contour_render.py` (the
 `render-contours` dev utility: DEM/GeoJSON → standalone SVG of contour lines + labels), `legend.py`
 (the `legend` dev utility: parse the TYP + style rules → HTML legend of swatch-per-element, served
-with a stdlib hot-reload HTTP server or written as a static file), `dem_download.py`
+with a stdlib hot-reload HTTP server or written as a static file), `tlm_download.py`
+(`--tlm-release` → swisstopo STAC → national swissTLM3D `.gdb` download-cache), `dem_download.py`
 (`--dem-area` → Copernicus GLO-30 tile download-cache), `jars.py` (Java +
 mkgmap/splitter download-cache), `splitter.py`, `mkgmap.py` (the `.IMG` build), `cli.py`. The bundled mkgmap
 **style + TYP** live under `src/topovert/styles/` (`topovert/` rule files + `topovert_typ.txt`);
@@ -126,6 +128,13 @@ sources with `TOPOVERT_MKGMAP_URL` / `TOPOVERT_SPLITTER_URL`.
   the IMG partition one 512-byte block larger than the actual file. It is NOT a corruption signal and
   does not affect rendering; ignore it. (If a map looks "empty", check you're viewing the map's
   coordinates — a small extent is easy to miss.)
+- **swissTLM3D *is* auto-downloadable** (`tlm_download.py`) — the older "CI can't fetch it" note was
+  wrong. swisstopo publishes it as open data at a plain unauthenticated HTTPS URL, discoverable via
+  the STAC collection `ch.swisstopo.swisstlm3d`. Caveats: it is **one national FileGDB per release**
+  (no per-tile assets, so no per-area selection here — clipping is `topovert-05p`), the asset to pick
+  is the `.gdb.zip` (the `.shp.zip` loses the layer/attribute structure `vector.py` needs, the `.xtf`
+  needs another driver), and it is **~2.9 GB compressed / ~10 GB extracted** — big enough that runner
+  disk, not bandwidth, is the binding constraint in CI.
 - **swissTLM3D `OBJEKTART` is an integer code, not a German string** (`vector.py` maps the documented
   codes per layer; verify with `ogrinfo -sql "SELECT DISTINCT OBJEKTART FROM <layer>"`). The GDB does
   **not** carry a coded-value domain for `OBJEKTART`, so the integer→label table comes from the
