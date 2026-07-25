@@ -15,7 +15,10 @@ Either input is optional: `--tlm` alone makes a **vector-only** map (no DEM), `-
 hillshade-only map. Large extents (up to whole-country) are tiled with **splitter** automatically.
 `--dem-area <name|bbox>` (e.g. `switzerland`) auto-downloads the covering **Copernicus GLO-30**
 (~30 m) DEM tiles in place of `--dem-dir`. A separate `render-contours` command previews a patch's
-contours as an SVG (for checking geometry + elevation labels without building an `.IMG`). Full
+contours as an SVG (for checking geometry + elevation labels without building an `.IMG`). A
+`legend` command previews the bundled style + TYP as a browser-viewable legend (one swatch per
+rendered element) and hot-reloads as you edit the style files, so colours/widths can be tuned
+without a full conversion. Full
 swissTLM3D/swissALTI3D STAC area selection is still deferred (`bd show topovert-y8s`).
 
 ## Keep the docs in sync
@@ -65,7 +68,9 @@ always built (bounds + contours), but the HGT tiles + `--dem` embed only happen 
 tiling geometry — unit-tested), `gdal_tools.py` (GDAL argv builders + exec), `osm.py` (OSM XML
 writer + node/way serializers + `assemble_osm`), `vector.py` (swissTLM3D → GeoJSON → OSM, data-only
 `TAG_MAP`, bounds), `contour.py` (DEM → `gdal_contour` → OSM contour ways), `contour_render.py` (the
-`render-contours` dev utility: DEM/GeoJSON → standalone SVG of contour lines + labels), `dem_download.py`
+`render-contours` dev utility: DEM/GeoJSON → standalone SVG of contour lines + labels), `legend.py`
+(the `legend` dev utility: parse the TYP + style rules → HTML legend of swatch-per-element, served
+with a stdlib hot-reload HTTP server or written as a static file), `dem_download.py`
 (`--dem-area` → Copernicus GLO-30 tile download-cache), `jars.py` (Java +
 mkgmap/splitter download-cache), `splitter.py`, `mkgmap.py` (the `.IMG` build), `cli.py`. The bundled mkgmap
 **style + TYP** live under `src/topovert/styles/` (`topovert/` rule files + `topovert_typ.txt`);
@@ -88,6 +93,8 @@ uv run topovert build --dem-area switzerland --contours --no-hillshade --out ./o
 uv run topovert build --dem-area switzerland --contours --no-hillshade --max-heap 8g --out ./out/ch.img  # faster: bigger JVM heap
 uv run topovert render-contours --dem-area "8.0,46.55,8.1,46.65" --out ./out/patch.svg  # preview contours as SVG
 uv run topovert render-contours --from-geojson contours.geojsonl --out patch.svg        # render a kept intermediate
+uv run topovert legend                                          # serve the style legend (hot reload) at 127.0.0.1:8000
+uv run topovert legend --out ./out/legend.html                  # write a standalone legend, no server
 uv run topovert -v build ... --keep-intermediate                # debug: verbose + keep workdir
 ```
 
@@ -170,7 +177,10 @@ sources with `TOPOVERT_MKGMAP_URL` / `TOPOVERT_SPLITTER_URL`.
   `FID`/`ProductCode` match `--family-id`/`--product-id` (6324/1) or the device silently ignores it
   (`test_style.py` guards this). Type codes left out of the TYP fall back to Garmin's default look.
   Editing rules is data-only; `test_style.py` asserts every emitted tag still has a matching rule.
-  No automated substitute for the visual check — load the result in QMapShack/on a device.
+  `topovert legend` (`legend.py`) renders a swatch-per-element legend from the TYP + style rules and
+  hot-reloads as you edit — the fast loop for tuning colours/widths. Like `render-contours` it draws
+  *our* styling (what we ask mkgmap to draw), so it can't reveal device-side quirks: there's still
+  no automated substitute for the final visual check — load the result in QMapShack/on a device.
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:7510c1e2 -->
 ## Beads Issue Tracker

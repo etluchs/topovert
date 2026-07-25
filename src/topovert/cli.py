@@ -7,7 +7,7 @@ import logging
 import sys
 from pathlib import Path
 
-from . import TopovertError, __version__, contour, contour_render
+from . import TopovertError, __version__, contour, contour_render, legend
 from .hgt import DEFAULT_RESOLUTION, DEM_RESOLUTIONS
 from .pipeline import build
 
@@ -172,6 +172,31 @@ def _build_parser() -> argparse.ArgumentParser:
         help="keep the temp workdir (VRT, clip, GPKG, GeoJSON) for inspection",
     )
     r.set_defaults(func=_cmd_render_contours)
+
+    # --- legend: browse the style + TYP as a hot-reloading web legend ---------
+    lg = sub.add_parser(
+        "legend",
+        help="preview the bundled style + TYP as a browser legend (swatch per "
+             "element); serves with hot reload, or writes a static HTML file",
+    )
+    lg.add_argument(
+        "--out", type=Path, default=None,
+        help="write a standalone legend.html and exit instead of serving "
+             "(no hot reload); open it in a browser",
+    )
+    lg.add_argument(
+        "--port", type=int, default=8000,
+        help="port for the hot-reload server (default: %(default)s)",
+    )
+    lg.add_argument(
+        "--host", default="127.0.0.1",
+        help="host/interface to bind the server to (default: %(default)s)",
+    )
+    lg.add_argument(
+        "--no-browser", dest="no_browser", action="store_true",
+        help="don't try to open a web browser when serving",
+    )
+    lg.set_defaults(func=_cmd_legend)
     return parser
 
 
@@ -220,6 +245,19 @@ def _cmd_render_contours(args: argparse.Namespace) -> int:
         keep_intermediate=args.keep_intermediate,
     )
     print(f"Wrote {out} (open it in a browser to check the contours).")
+    return 0
+
+
+def _cmd_legend(args: argparse.Namespace) -> int:
+    if args.out is not None:
+        out = legend.render_legend(args.out)
+        print(f"Wrote {out} (open it in a browser to view the style legend).")
+        return 0
+    legend.serve(
+        host=args.host,
+        port=args.port,
+        open_browser=not args.no_browser,
+    )
     return 0
 
 
