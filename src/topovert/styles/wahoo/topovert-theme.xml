@@ -1,0 +1,177 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  topovert render theme for Wahoo (mapsforge render-theme v5).
+
+  This is the Wahoo counterpart of styles/topovert_typ.txt, with one crucial
+  difference: a Garmin TYP is compiled INTO the map, while a mapsforge theme
+  lives ON THE DEVICE. Copy this file onto the device as its render theme
+  (BOLT/ROAM read mapsforge themes, e.g. mapsforge-bolt.xml / mapsforge-roam.xml);
+  without it the device draws our data with its own stock theme, which knows
+  nothing about contour lines and will simply not draw them.
+
+  Colours mirror topovert_typ.txt so the two outputs look like the same map.
+  Rules are drawn in document order, so land cover comes first and labels last.
+
+  Contour labels read `ref`, not `ele`: the mapsforge format stores an elevation
+  on POIs only, so contour.contour_tags puts the metre value in `ref` as well.
+  They are metres — the `conv:m=>ft` trick in the mkgmap style exists because
+  Garmin's .IMG format stores contour elevations in feet; mapsforge just draws
+  the string it was given, so no conversion here.
+
+  The ELEMNT (as opposed to BOLT/ROAM) renders with VTM, whose theme schema
+  differs — see topovert-clv.4.
+
+  After editing, validate this file against the mapsforge schema named in its
+  xsi:schemaLocation above (the test suite cannot: stdlib has no XSD validator).
+  The xmllint command is in CLAUDE.md, under Gotchas.
+-->
+<rendertheme xmlns="http://mapsforge.org/renderTheme"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://mapsforge.org/renderTheme https://raw.githubusercontent.com/mapsforge/mapsforge/master/resources/renderTheme.xsd"
+    version="5" map-background="#F7F5F0" base-stroke-width="1" base-text-size="1">
+
+    <!-- ======================= Land cover (areas) ======================= -->
+    <rule e="way" k="natural" v="water" closed="yes" zoom-min="8">
+        <area fill="#5AA0D8" stroke="#3F7FB0" stroke-width="0.2" />
+    </rule>
+    <rule e="way" k="natural" v="glacier" closed="yes" zoom-min="9">
+        <area fill="#E4F1FB" stroke="#BBD5E8" stroke-width="0.2" />
+    </rule>
+    <rule e="way" k="natural" v="bare_rock" closed="yes" zoom-min="10">
+        <area fill="#D8D2C6" />
+    </rule>
+    <rule e="way" k="natural" v="scree" closed="yes" zoom-min="12">
+        <area fill="#E6E1D6" />
+    </rule>
+    <rule e="way" k="natural" v="wood" closed="yes" zoom-min="10">
+        <area fill="#BFE0A8" />
+    </rule>
+    <rule e="way" k="natural" v="scrub" closed="yes" zoom-min="12">
+        <area fill="#D2E8B4" />
+    </rule>
+    <rule e="way" k="natural" v="wetland" closed="yes" zoom-min="12">
+        <area fill="#B8DCD0" />
+    </rule>
+    <rule e="way" k="building" v="yes" closed="yes" zoom-min="15">
+        <area fill="#C8A8A0" stroke="#A08880" stroke-width="0.2" />
+    </rule>
+
+    <!-- ============================ Contours ============================
+         Index lines bolder and labelled; intermediate lines thin and only
+         once zoomed in, so the terrain reads without clutter. -->
+    <rule e="way" k="contour" v="elevation" zoom-min="11">
+        <rule e="way" k="contour_ext" v="elevation_major">
+            <rule e="way" k="*" v="*" zoom-min="11" zoom-max="12">
+                <line stroke="#906030" stroke-width="0.25" />
+            </rule>
+            <rule e="way" k="*" v="*" zoom-min="13">
+                <line stroke="#906030" stroke-width="0.45" />
+                <pathText k="ref" font-size="9" fill="#906030" stroke="#F7F5F0"
+                    stroke-width="1.5" />
+            </rule>
+        </rule>
+        <rule e="way" k="contour_ext" v="elevation_minor" zoom-min="13">
+            <line stroke="#B08050" stroke-width="0.2" />
+        </rule>
+    </rule>
+
+    <!-- ========================== Watercourses ========================== -->
+    <rule e="way" k="waterway" v="river" zoom-min="10">
+        <line stroke="#5AA0D8" stroke-width="0.7" />
+    </rule>
+    <rule e="way" k="waterway" v="canal" zoom-min="12">
+        <line stroke="#5AA0D8" stroke-width="0.5" />
+    </rule>
+    <rule e="way" k="waterway" v="stream" zoom-min="13">
+        <rule e="way" k="intermittent" v="yes">
+            <line stroke="#5AA0D8" stroke-width="0.35" stroke-dasharray="6,4" />
+        </rule>
+        <!-- v="~" matches "key not present" -->
+        <rule e="way" k="intermittent" v="~">
+            <line stroke="#5AA0D8" stroke-width="0.35" />
+        </rule>
+    </rule>
+    <rule e="way" k="route" v="ferry" zoom-min="10">
+        <line stroke="#5AA0D8" stroke-width="0.4" stroke-dasharray="8,6" />
+    </rule>
+
+    <!-- ====================== Walls, rail, aerialways ==================== -->
+    <rule e="way" k="barrier" v="wall" zoom-min="16">
+        <line stroke="#806040" stroke-width="0.25" />
+    </rule>
+    <rule e="way" k="railway" v="rail" zoom-min="10">
+        <line stroke="#303030" stroke-width="0.6" />
+        <line stroke="#FFFFFF" stroke-width="0.3" stroke-dasharray="6,6" />
+    </rule>
+    <rule e="way" k="railway" v="narrow_gauge" zoom-min="12">
+        <line stroke="#303030" stroke-width="0.45" />
+        <line stroke="#FFFFFF" stroke-width="0.2" stroke-dasharray="5,5" />
+    </rule>
+    <rule e="way" k="aerialway" v="*" zoom-min="12">
+        <line stroke="#707070" stroke-width="0.3" stroke-dasharray="10,4" />
+    </rule>
+
+    <!-- ============================== Roads ==============================
+         Drawn after everything else so junctions stay readable; paths get the
+         Swiss hiking red-dashed treatment of the TYP's 0x16 Wanderweg. -->
+    <rule e="way" k="highway" v="track" zoom-min="12">
+        <line stroke="#A06828" stroke-width="0.45" stroke-dasharray="10,5" />
+    </rule>
+    <rule e="way" k="highway" v="path" zoom-min="12">
+        <line stroke="#E03028" stroke-width="0.4" stroke-dasharray="7,5" />
+    </rule>
+    <rule e="way" k="highway" v="service|residential|unclassified|road" zoom-min="12">
+        <line stroke="#8C8C8C" stroke-width="0.5" />
+        <line stroke="#FFFFFF" stroke-width="0.3" />
+    </rule>
+    <rule e="way" k="highway" v="tertiary" zoom-min="11">
+        <line stroke="#8C8C8C" stroke-width="0.7" />
+        <line stroke="#FFFFFF" stroke-width="0.5" />
+    </rule>
+    <rule e="way" k="highway" v="secondary" zoom-min="10">
+        <line stroke="#B08040" stroke-width="0.8" />
+        <line stroke="#FFF0C0" stroke-width="0.6" />
+    </rule>
+    <rule e="way" k="highway" v="primary" zoom-min="9">
+        <line stroke="#B06030" stroke-width="0.9" />
+        <line stroke="#FFD8A0" stroke-width="0.7" />
+    </rule>
+    <rule e="way" k="highway" v="motorway|motorway_link|trunk" zoom-min="8">
+        <line stroke="#804060" stroke-width="1.0" />
+        <line stroke="#E8A0C0" stroke-width="0.8" />
+    </rule>
+    <rule e="way" k="highway" v="*" zoom-min="14">
+        <pathText k="name" font-size="8" fill="#404040" stroke="#F7F5F0"
+            stroke-width="1.5" />
+    </rule>
+
+    <!-- ============================== POIs ===============================
+         Dots + labels rather than icons: symbols would need image resources
+         shipped alongside the theme (see topovert-clv.4 / the README). -->
+    <rule e="node" k="man_made" v="cross|survey_point" zoom-min="14">
+        <circle radius="1.6" fill="#404040" stroke="#FFFFFF" stroke-width="0.4" />
+        <caption k="name" font-size="9" fill="#303030" stroke="#F7F5F0"
+            stroke-width="1.5" dy="-8" />
+    </rule>
+    <rule e="node" k="natural" v="spring|cave_entrance" zoom-min="15">
+        <circle radius="1.4" fill="#3F7FB0" stroke="#FFFFFF" stroke-width="0.4" />
+        <caption k="name" font-size="8" fill="#3F7FB0" stroke="#F7F5F0"
+            stroke-width="1.5" dy="-8" />
+    </rule>
+    <rule e="node" k="waterway" v="waterfall" zoom-min="14">
+        <circle radius="1.6" fill="#3F7FB0" stroke="#FFFFFF" stroke-width="0.4" />
+        <caption k="name" font-size="9" fill="#3F7FB0" stroke="#F7F5F0"
+            stroke-width="1.5" dy="-8" />
+    </rule>
+    <rule e="node" k="amenity" v="fountain" zoom-min="15">
+        <circle radius="1.4" fill="#5AA0D8" stroke="#FFFFFF" stroke-width="0.4" />
+    </rule>
+    <rule e="node" k="man_made" v="water_works" zoom-min="16">
+        <circle radius="1.2" fill="#707070" stroke="#FFFFFF" stroke-width="0.4" />
+    </rule>
+    <rule e="node" k="historic" v="monument|wayside_shrine|boundary_stone" zoom-min="15">
+        <circle radius="1.4" fill="#806040" stroke="#FFFFFF" stroke-width="0.4" />
+        <caption k="name" font-size="8" fill="#604020" stroke="#F7F5F0"
+            stroke-width="1.5" dy="-8" />
+    </rule>
+</rendertheme>

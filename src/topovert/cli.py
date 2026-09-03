@@ -7,9 +7,9 @@ import logging
 import sys
 from pathlib import Path
 
-from . import TopovertError, __version__, contour, contour_render, legend
+from . import TopovertError, __version__, contour, contour_render, legend, wahoo
 from .hgt import DEFAULT_RESOLUTION, DEM_RESOLUTIONS
-from .pipeline import build
+from .pipeline import OUTPUT_FORMATS, build
 
 
 def _parse_bbox(value: str) -> tuple[float, float, float, float]:
@@ -29,7 +29,7 @@ def _parse_bbox(value: str) -> tuple[float, float, float, float]:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="topovert",
-        description="Convert Swisstopo data into Garmin .IMG maps.",
+        description="Convert Swisstopo data into Garmin .IMG or Wahoo maps.",
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument(
@@ -39,7 +39,8 @@ def _build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
     b = sub.add_parser(
         "build",
-        help="build a hill-shaded .IMG from a directory of DEM GeoTIFFs",
+        help="build a Garmin .IMG (or Wahoo map tiles) from DEM and/or "
+             "swissTLM3D sources",
     )
     b.add_argument(
         "--dem-dir", type=Path, default=None,
@@ -54,7 +55,18 @@ def _build_parser() -> argparse.ArgumentParser:
              "exclusive with --dem-dir",
     )
     b.add_argument(
-        "--out", type=Path, required=True, help="output .IMG path",
+        "--out", type=Path, required=True,
+        help="output path: the .IMG file, or (with --format wahoo) the "
+             "directory to fill with map tiles",
+    )
+    b.add_argument(
+        "--format", dest="output_format", choices=list(OUTPUT_FORMATS),
+        default="garmin",
+        help="output format (default: %(default)s). 'garmin' writes one "
+             "gmapsupp .IMG; 'wahoo' writes zoom-8 <x>/<y>.map.lzma tiles for "
+             "an ELEMNT/BOLT/ROAM (copy them into the device's "
+             "maps/tiles/8/ folder). Wahoo maps carry no hillshade, so pair it "
+             "with --contours and/or a swissTLM3D source",
     )
     b.add_argument(
         "--dem-resolution", choices=sorted(DEM_RESOLUTIONS), default=DEFAULT_RESOLUTION,
@@ -104,12 +116,13 @@ def _build_parser() -> argparse.ArgumentParser:
         "--no-hillshade", dest="no_hillshade", action="store_true",
         help="don't embed the DEM for shaded relief (much smaller .IMG); the DEM "
              "is still used for bounds and --contours. Pair with --contours for a "
-             "lightweight contour-only map",
+             "lightweight contour-only map. Implied by --format wahoo",
     )
     b.add_argument(
         "--max-nodes", type=int, default=None,
         help="splitter tile size in OSM nodes for large extents (default: "
-             "splitter's own ~1.6M); only used when the map needs tiling",
+             "splitter's own ~1.6M); only used when the map needs tiling "
+             "(Garmin output only — Wahoo tiles on its own zoom-8 grid)",
     )
     b.add_argument(
         "--max-heap", default=None, metavar="SIZE",
@@ -122,7 +135,8 @@ def _build_parser() -> argparse.ArgumentParser:
         "--opaque", action="store_true",
         help="build a standalone (non-transparent) map. By default the map is "
              "transparent so it overlays the device's base map (roads/towns "
-             "show through); use this only if topovert is your sole base map",
+             "show through); use this only if topovert is your sole base map. "
+             "Garmin output only: a Wahoo map always replaces the device's tile",
     )
     b.add_argument(
         "--work-dir", type=Path, default=None,
@@ -216,6 +230,7 @@ def _cmd_build(args: argparse.Namespace) -> int:
         resampling=args.resampling,
         source_epsg=args.source_epsg,
         map_name=args.name,
+        output_format=args.output_format,
         tlm_path=args.tlm,
         tlm_release=args.tlm_release,
         tlm_layers=args.tlm_layers,
@@ -236,7 +251,16 @@ def _cmd_build(args: argparse.Namespace) -> int:
     if args.tlm or args.tlm_release:
         feats.append("vector features")
     summary = "; ".join(feats) if feats else "bounds only"
-    print(f"Wrote {result.out_path} ({summary}).")
+    if result.map_tiles:
+        print(
+            f"Wrote {len(result.map_tiles)} Wahoo tile(s) under {result.out_path} "
+            f"({summary}): {', '.join(result.map_tiles)}.\n"
+            "Copy the <x>/ folders into the device's maps/tiles/8/ folder, and "
+            f"install {wahoo.THEME_FILE.name} as the device's render theme "
+            "(see the README) or the map will not be drawn."
+        )
+    else:
+        print(f"Wrote {result.out_path} ({summary}).")
     return 0
 
 

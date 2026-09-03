@@ -8,7 +8,8 @@ Topovert converts freely available [Swisstopo](https://www.swisstopo.admin.ch/de
 data into `.IMG` files installable on Garmin navigation devices.
 
 **v1 (current) is one vertical slice:** a local directory of swissALTI3D GeoTIFF elevation tiles
-(EPSG:2056 / LV95) → a hill-shaded Garmin `.IMG`. `--tlm <swissTLM3D>` overlays vector features —
+(EPSG:2056 / LV95) → a hill-shaded Garmin `.IMG`. `--format wahoo` compiles the same data to
+mapsforge `.map.lzma` tiles for a Wahoo ELEMNT/BOLT/ROAM instead (see the Wahoo notes below). `--tlm <swissTLM3D>` overlays vector features —
 roads/paths, railways, aerialways, watercourses, land cover (water/forest/rock/glacier/wetland),
 buildings, POIs, and walls. `--contours` adds elevation contour lines derived from the DEM.
 Either input is optional: `--tlm` alone makes a **vector-only** map (no DEM), `--dem-dir` alone a
@@ -32,6 +33,8 @@ in `cli.py`. Concretely:
 
 - New/renamed/removed CLI flags or commands → update `cli.py` help, the `README.md` **Usage** block,
   and the `## Commands` section here.
+- Anything about the Wahoo output (tile layout, theme install, what it cannot do) → the README's
+  **Wahoo maps** section; `tests/test_docs.py` guards the two install steps.
 - Capabilities shipping or moving from "planned" → "done" → update the `README.md` **Status**/**Features**
   sections and the **What the project does** summary above.
 - Input/output formats, prerequisites, or version pins → update wherever they're named (e.g. swissTLM3D
@@ -54,6 +57,8 @@ geospatial/encoding code itself:
   rather than `ogr2pbf`, and contours use `gdal_contour` rather than `pyhgtmap` (both alternatives
   need the `osgeo` bindings + pip deps) — see `bd show topovert-rn1` / `topovert-783`.
 - **mkgmap** (Java) — does all Garmin `.IMG` encoding, including embedding the DEM for hillshading.
+- **osmosis + the mapsforge map-writer plugin** (Java) — the Wahoo half of the same idea: they turn
+  our OSM into mapsforge `.map` tiles. Both are auto-downloaded + SHA-pinned like mkgmap.
 - **splitter** (Java, same source) — tiles a large `.osm` into mkgmap-sized pieces; used automatically
   when the OSM exceeds `pipeline.SPLIT_NODE_THRESHOLD` nodes.
 
@@ -73,12 +78,21 @@ writer + node/way serializers + `assemble_osm`), `vector.py` (swissTLM3D → Geo
 `TAG_MAP`, bounds), `contour.py` (DEM → `gdal_contour` → OSM contour ways), `contour_render.py` (the
 `render-contours` dev utility: DEM/GeoJSON → standalone SVG of contour lines + labels), `legend.py`
 (the `legend` dev utility: parse the TYP + style rules → HTML legend of swatch-per-element, served
-with a stdlib hot-reload HTTP server or written as a static file), `tlm_download.py`
+with a stdlib hot-reload HTTP server or written as a static file), `wahoo.py` (the Wahoo backend:
+zoom-8 tile geometry, the osmosis/map-writer argv, lzma packaging), `tlm_download.py`
 (`--tlm-release` → swisstopo STAC → national swissTLM3D `.gdb` download-cache), `dem_download.py`
 (`--dem-area` → Copernicus GLO-30 tile download-cache), `jars.py` (Java +
 mkgmap/splitter download-cache), `splitter.py`, `mkgmap.py` (the `.IMG` build), `cli.py`. The bundled mkgmap
 **style + TYP** live under `src/topovert/styles/` (`topovert/` rule files + `topovert_typ.txt`);
-`mkgmap.py` always applies them via `--style-file` + the TYP input.
+`mkgmap.py` always applies them via `--style-file` + the TYP input. The Wahoo equivalents live in
+`styles/wahoo/` (`tag-mapping.xml` = what map-writer *stores*, `topovert-theme.xml` = how the device
+*draws* it).
+
+**The Wahoo branch** (`--format wahoo`, `pipeline.OUTPUT_FORMATS`) replaces only the last step: after
+`map.osm` is assembled, `wahoo.build_tiles` rewrites it for osmosis (adding the `version` attribute
+osmosis demands and collecting, in the same pass, which zoom-8 tiles hold nodes), then runs
+osmosis + map-writer once per tile and lzma-compresses each `.map` into `<out>/<x>/<y>.map.lzma`
+(plus the empty `.17` "tile present" marker Wahoo expects). `--out` is a *directory* for this format.
 
 The README's "browser + WASM" idea is **incompatible** with this GDAL+JVM pipeline; v1 is a local CLI.
 
@@ -97,15 +111,18 @@ uv run topovert build --dem-area switzerland --contours --no-hillshade --out ./o
 uv run topovert build --dem-area switzerland --contours --no-hillshade --max-heap 8g --out ./out/ch.img  # faster: bigger JVM heap
 uv run topovert render-contours --dem-area "8.0,46.55,8.1,46.65" --out ./out/patch.svg  # preview contours as SVG
 uv run topovert render-contours --from-geojson contours.geojsonl --out patch.svg        # render a kept intermediate
+uv run topovert build --dem-area "8.0,46.55,8.6,46.85" --contours --format wahoo --out ./out/wahoo  # Wahoo tiles (--out is a directory)
 uv run topovert legend                                          # serve the style legend (hot reload) at 127.0.0.1:8000
 uv run topovert legend --out ./out/legend.html                  # write a standalone legend, no server
 uv run topovert -v build ... --keep-intermediate                # debug: verbose + keep workdir
 ```
 
 **System prerequisites** (checked at runtime, not pip-installed): GDAL CLI (the **SRTMHGT driver** is
-only needed for the DEM/hillshade path) and a Java **≥ 1.8** runtime. mkgmap.jar and splitter.jar are
+only needed for the DEM/hillshade path) and a Java **≥ 1.8** runtime. mkgmap.jar and splitter.jar —
+and, for `--format wahoo`, the osmosis distribution + the mapsforge-map-writer plugin jar — are
 auto-downloaded + SHA-pinned into the per-user cache (`~/.cache/topovert/`) on first use; override the
-sources with `TOPOVERT_MKGMAP_URL` / `TOPOVERT_SPLITTER_URL`.
+sources with `TOPOVERT_MKGMAP_URL` / `TOPOVERT_SPLITTER_URL` / `TOPOVERT_OSMOSIS_URL` /
+`TOPOVERT_MAPWRITER_URL`.
 
 ## Gotchas (hard-won; see `bd memories`)
 
@@ -181,6 +198,32 @@ sources with `TOPOVERT_MKGMAP_URL` / `TOPOVERT_SPLITTER_URL`.
   building/loading an `.IMG`; it can also render a kept `contours.geojsonl` (`--from-geojson`, no
   GDAL). It renders *our* data (correct metres), so it can't reveal device-side unit bugs — that's
   what the `conv:m=>ft` rule above is for.
+- **Wahoo needs osmosis 0.48.3, not 0.49.x**: 0.49's jars are Java 17 bytecode, which would raise
+  the project's Java floor (>= 1.8, set by mkgmap) for Wahoo builds only. 0.48.3 is Java 8 and also
+  keeps the classic `lib/default/` layout. The map-writer plugin registers itself through the
+  `osmosis-plugins.conf` resource osmosis scans **on the classpath**, so `wahoo.classpath` just puts
+  the plugin jar next to `lib/default/*` — nothing needs installing into `~/.openstreetmap/`, and we
+  never touch osmosis' `bin/` wrapper (we invoke `org.openstreetmap.osmosis.core.Osmosis` directly).
+- **osmosis rejects our OSM as written**: it wants an OSM 0.6 `version` attribute on every node/way
+  ("Node 1 does not have a version attribute") and, unless told `enableDateParsing=false`, a
+  `timestamp` too. mkgmap needs neither, and `version='1'` on every node would fatten the intermediate
+  by ~20% on the Garmin path as well, so `wahoo.osmosis_xml` adds it in a streaming rewrite instead.
+- **mapsforge stores an elevation on POIs only** (`TDNode` has it, `TDWay` does not), so a contour
+  way's `ele` never reaches the device. `contour.contour_tags` therefore repeats the metre value in
+  **`ref`**, and the theme labels contours with `<pathText k="ref">`. It must not be `name`: mkgmap's
+  `name` action sets a label *only if one is not already set*, so a metre `name` would suppress the
+  `conv:m=>ft` conversion and reintroduce the "metres shown as feet" bug on Garmin.
+- **An empty Wahoo tile is not harmless**: the tile you ship *replaces* the device's own map for that
+  ~100 km square, so an all-empty tile blanks it. Size is no way to tell — an "empty" `.map` is a
+  valid ~1 KB file (the tile index alone), not a stub — so `wahoo.osmosis_xml` records which zoom-8
+  tiles actually contain nodes while it streams the file, and only those get built.
+- **map-writer clips to its own `bbox`**, so running it once per tile over the *whole* OSM is correct
+  without pre-cutting the input; it is only O(tiles x input) slow (topovert-clv.5). Verified with two
+  runs over the same input and different bboxes.
+- **Validate the two Wahoo XML files against mapsforge's schemas** after editing them — nothing in
+  the test suite can (stdlib has no XSD validator), but the `xsi:schemaLocation` in each file names
+  the XSD: `xmllint --noout --schema <that URL> src/topovert/styles/wahoo/<file>.xml`. A theme that
+  fails validation is silently ignored by the device.
 - **The Swiss rendering is a mkgmap style + a text TYP** (`src/topovert/styles/`). The style's
   `lines`/`points`/`polygons` map the OSM tags `vector.py` emits to Garmin type codes + resolutions;
   `topovert_typ.txt` recolours the topo-relevant types (land cover, paths, watercourses). mkgmap
@@ -192,6 +235,8 @@ sources with `TOPOVERT_MKGMAP_URL` / `TOPOVERT_SPLITTER_URL`.
   hot-reloads as you edit — the fast loop for tuning colours/widths. Like `render-contours` it draws
   *our* styling (what we ask mkgmap to draw), so it can't reveal device-side quirks: there's still
   no automated substitute for the final visual check — load the result in QMapShack/on a device.
+  The Wahoo side has *no* preview at all yet (topovert-clv.6) and its theme lives on the device, so
+  its colours are unverified until someone loads them on an ELEMNT/BOLT/ROAM (topovert-clv.3).
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:7510c1e2 -->
 ## Releasing prebuilt maps

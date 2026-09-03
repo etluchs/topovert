@@ -32,13 +32,26 @@ def test_gdal_contour_cmd_passes_snodata_as_int_when_integral():
 def test_contour_tags_classifies_major_and_minor():
     # every 5th * 20 m == each 100 m is a bold index (major) line
     assert contour.contour_tags(100, interval=20, major_every=5) == {
-        "contour": "elevation", "ele": "100", "contour_ext": "elevation_major",
+        "contour": "elevation", "ele": "100", "ref": "100",
+        "contour_ext": "elevation_major",
     }
     assert contour.contour_tags(120, interval=20, major_every=5) == {
-        "contour": "elevation", "ele": "120", "contour_ext": "elevation_minor",
+        "contour": "elevation", "ele": "120", "ref": "120",
+        "contour_ext": "elevation_minor",
     }
     # elevation is rounded to an integer ele
     assert contour.contour_tags(119.6, interval=20, major_every=5)["ele"] == "120"
+
+
+def test_contour_tags_repeat_the_metre_value_in_ref():
+    """`ref` is the label slot for Wahoo: mapsforge stores no way elevation.
+
+    It must stay in metres and must NOT be `name`, which would suppress the
+    metres->feet conversion the Garmin style applies (see contour_tags).
+    """
+    tags = contour.contour_tags(2000, interval=20, major_every=5)
+    assert tags["ref"] == tags["ele"] == "2000"
+    assert "name" not in tags
 
 
 def test_feature_to_osm_linestring_emits_nodes_and_way_with_tags():

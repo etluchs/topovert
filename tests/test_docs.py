@@ -14,7 +14,7 @@ from pathlib import Path
 
 import tomllib
 
-from topovert import cli
+from topovert import cli, wahoo
 
 _ROOT = Path(__file__).resolve().parents[1]
 _README = (_ROOT / "README.md").read_text(encoding="utf-8")
@@ -128,3 +128,20 @@ def test_tlm_input_is_a_geodatabase_not_geopackage():
             f"{name} calls the swissTLM3D input a GeoPackage/.gpkg; it is a "
             "GeoDatabase (.gdb)."
         )
+
+
+def test_readme_documents_the_wahoo_install_steps():
+    """A Wahoo map is invisible without both halves of the install.
+
+    Copying the tiles to the right folder is only half of it: the render theme
+    lives on the device, so a user who skips it sees no contour lines at all and
+    concludes the build is broken.
+    """
+    assert "maps/tiles/8" in _README, (
+        "README doesn't say where Wahoo tiles go on the device"
+    )
+    assert wahoo.THEME_FILE.name in _README, (
+        f"README doesn't tell people to install {wahoo.THEME_FILE.name} on the "
+        "device; without it the map renders with the stock theme and our "
+        "contour lines are simply not drawn"
+    )

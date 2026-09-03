@@ -1,17 +1,25 @@
-"""End-to-end orchestration: swissALTI3D GeoTIFFs -> hill-shaded Garmin .IMG."""
+"""End-to-end orchestration: Swisstopo data -> a Garmin .IMG or Wahoo map tiles.
+
+The pipeline is format-neutral until the assembled ``map.osm``: DEM handling,
+swissTLM3D tagging and contour extraction produce the same OSM either way, and
+only the last step differs — splitter+mkgmap for Garmin (:mod:`topovert.mkgmap`),
+osmosis+mapsforge-map-writer for Wahoo (:mod:`topovert.wahoo`).
+"""
 
 from __future__ import annotations
 
 import logging
+import os
 import re
 import shutil
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import TopovertError
 from . import (
-    contour, dem_download, gdal_tools, jars, mkgmap, osm, splitter, tlm_download, vector,
+    contour, dem_download, gdal_tools, jars, mkgmap, osm, splitter, tlm_download,
+    vector, wahoo,
 )
 from .hgt import DEFAULT_RESOLUTION, DEM_RESOLUTIONS, tiles_for_bounds
 
@@ -30,12 +38,19 @@ DEM_TILE_MARGIN_DEG = 0.05
 # first tiled with splitter. Whole-canton/country swissTLM3D extents far exceed it.
 SPLIT_NODE_THRESHOLD = 2_000_000
 
+# Output formats: a single Garmin ``.IMG`` file, or a directory of Wahoo
+# (mapsforge) zoom-8 map tiles. See :mod:`topovert.wahoo` for what the second
+# one cannot do (no hillshade, no transparent overlay, device-side styling).
+OUTPUT_FORMATS = ("garmin", "wahoo")
+
 
 @dataclass
 class BuildResult:
     out_path: Path
     tiles: list[str]
     bounds: tuple[float, float, float, float]
+    # Wahoo builds only: the "<x>/<y>" zoom-8 tiles actually written.
+    map_tiles: list[str] = field(default_factory=list)
 
 
 def _find_geotiffs(dem_dir: Path) -> list[Path]:
@@ -56,6 +71,7 @@ def build(
     resampling: str = "bilinear",
     source_epsg: int | None = None,
     map_name: str = "topovert",
+    output_format: str = "garmin",
     tlm_path: Path | None = None,
     tlm_release: str | None = None,
     tlm_layers: list[str] | None = None,
@@ -68,7 +84,7 @@ def build(
     work_dir: Path | None = None,
     keep_intermediate: bool = False,
 ) -> BuildResult:
-    """Build a Garmin ``.IMG`` from a DEM and/or swissTLM3D vectors.
+    """Build a Garmin ``.IMG`` or Wahoo map tiles from a DEM and/or swissTLM3D vectors.
 
     The DEM source is either a local ``dem_dir`` of GeoTIFFs or ``dem_area`` (a
     named area or WGS84 bbox) whose Copernicus GLO-30 tiles are auto-downloaded
@@ -86,6 +102,12 @@ def build(
     ``hillshade`` (default) embeds the DEM as a height grid for shaded relief;
     set it ``False`` to skip the heavy DEM embed while still using the DEM for
     bounds and ``--contours`` — a much smaller contour-only map.
+
+    ``output_format`` picks the last step: ``"garmin"`` writes the single
+    ``.IMG`` at ``out_path``; ``"wahoo"`` treats ``out_path`` as a *directory*
+    and fills it with zoom-8 ``<x>/<y>.map.lzma`` tiles for an ELEMNT/BOLT/ROAM.
+    Wahoo maps cannot carry a hillshade (mapsforge holds no elevation grid), so
+    that format needs ``contours`` and/or a vector source.
     """
     if resolution not in DEM_RESOLUTIONS:
         raise TopovertError(
@@ -98,6 +120,13 @@ def build(
             f"invalid --max-heap {max_heap!r}; use a JVM -Xmx size like "
             "'8g', '512m' or a plain byte count"
         )
+
+    if output_format not in OUTPUT_FORMATS:
+        raise TopovertError(
+            f"unknown output format {output_format!r}; choose from "
+            f"{sorted(OUTPUT_FORMATS)}"
+        )
+    wahoo_out = output_format == "wahoo"
 
     if dem_dir is not None and dem_area is not None:
         raise TopovertError(
@@ -115,6 +144,12 @@ def build(
         raise TopovertError(
             "nothing to build: pass --dem-dir, --dem-area, --tlm and/or --tlm-release"
         )
+    if wahoo_out and not contours and not have_tlm:
+        raise TopovertError(
+            "--format wahoo cannot embed a hillshade DEM (a mapsforge map holds "
+            "no elevation grid), so a DEM on its own builds an empty map: add "
+            "--contours and/or a swissTLM3D source"
+        )
     if contours and not have_dem:
         raise TopovertError(
             "--contours needs a DEM (--dem-dir or --dem-area): contours are "
@@ -125,6 +160,14 @@ def build(
             "--no-hillshade with only a DEM leaves an empty map: add --contours "
             "and/or --tlm, or drop --no-hillshade"
         )
+    if wahoo_out and hillshade:
+        if have_dem:
+            log.info(
+                "Wahoo devices do not render an embedded DEM; skipping the "
+                "hillshade (the contour lines carry the terrain)"
+            )
+        hillshade = False
+
     # Validate the area now (cheap) so a typo fails before the slow download.
     if dem_area is not None:
         dem_download.parse_area(dem_area)
@@ -158,14 +201,19 @@ def build(
             raise TopovertError(f"--tlm source not found: {tlm_path}")
 
     out_path = out_path.resolve()
-    out_path.parent.mkdir(parents=True, exist_ok=True)
+    # Garmin builds write one file; Wahoo builds fill a directory of tiles.
+    if wahoo_out:
+        out_path.mkdir(parents=True, exist_ok=True)
+    else:
+        out_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Whole-country intermediates reach tens of GB, so default the workdir to the
     # output filesystem (next to --out) rather than the system temp, which is
     # often a small RAM-backed tmpfs. Override with --work-dir.
     if work_dir is not None:
         work_dir.mkdir(parents=True, exist_ok=True)
-    workdir = Path(tempfile.mkdtemp(prefix="topovert-", dir=str(work_dir or out_path.parent)))
+    scratch_base = work_dir or (out_path if wahoo_out else out_path.parent)
+    workdir = Path(tempfile.mkdtemp(prefix="topovert-", dir=str(scratch_base)))
     log.debug("workdir: %s", workdir)
     try:
         # --- bounds, and the optional DEM (HGT tiles) -----------------------
@@ -222,7 +270,26 @@ def build(
             map_osm = osm.write_bounds_osm(bounds, workdir / "bounds.osm", name=map_name)
             n_nodes = 0
 
-        # --- compile: splitter (large) then mkgmap, or mkgmap directly ------
+        # --- compile: the one format-specific step --------------------------
+        if wahoo_out:
+            # osmosis + the mapsforge map-writer plugin, once per zoom-8 tile.
+            map_tiles = wahoo.build_tiles(
+                java, jars.ensure_osmosis(), jars.ensure_mapwriter(),
+                map_osm, bounds, out_path,
+                workdir=workdir,
+                # map-writer parallelises within a tile; leave a core free.
+                threads=max((os.cpu_count() or 1) - 1, 1),
+                # Large extents would not fit a tile's data in RAM.
+                hd=n_nodes > SPLIT_NODE_THRESHOLD,
+                max_heap=max_heap,
+                keep_intermediate=keep_intermediate,
+            )
+            log.info("wrote %d tile(s) under %s", len(map_tiles), out_path)
+            return BuildResult(
+                out_path=out_path, tiles=[], bounds=bounds,
+                map_tiles=[f"{t.x}/{t.y}" for t in map_tiles],
+            )
+
         jar = jars.ensure_mkgmap()
         out_dir = workdir / "out"
         if n_nodes > SPLIT_NODE_THRESHOLD:

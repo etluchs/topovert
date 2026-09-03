@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  mapsforge map-writer tag mapping for topovert's Wahoo output (see
+  src/topovert/wahoo.py). This decides which OSM tags are STORED in the .map
+  file and from which zoom level on; how they are DRAWN is topovert-theme.xml,
+  which lives on the device. A tag missing here can never appear on the device,
+  whatever the theme says; the more restrictive of the two wins.
+
+  The tags below are exactly the ones src/topovert/vector.py (swissTLM3D) and
+  src/topovert/contour.py emit — tests/test_style.py enforces that.
+
+  Not listed, because the map-writer stores them by itself as "special" fields
+  of every POI/way: name, ref, addr:housenumber, layer. That is also why contour
+  elevations travel in `ref` (see contour.contour_tags): a way has no elevation
+  field in the mapsforge format, only a POI does.
+
+  After editing, validate this file against the mapsforge schema named in its
+  xsi:schemaLocation above (the test suite cannot: stdlib has no XSD validator).
+  The xmllint command is in CLAUDE.md, under Gotchas.
+-->
+<tag-mapping xmlns="http://mapsforge.org/tag-mapping"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://mapsforge.org/tag-mapping https://raw.githubusercontent.com/mapsforge/mapsforge/master/resources/tag-mapping.xsd"
+    default-zoom-appear="14" profile-name="topovert">
+
+    <!-- ***************************** POIs ***************************** -->
+    <pois>
+        <!-- TLM_EINZELOBJEKT: summit crosses and survey marks are the useful
+             ones far out; the rest only when zoomed in. -->
+        <osm-tag key="man_made" value="cross" zoom-appear="14" />
+        <osm-tag key="man_made" value="survey_point" zoom-appear="16" />
+        <osm-tag key="man_made" value="water_works" zoom-appear="16" />
+        <osm-tag key="natural" value="spring" zoom-appear="15" />
+        <osm-tag key="natural" value="cave_entrance" zoom-appear="15" />
+        <osm-tag key="waterway" value="waterfall" zoom-appear="14" />
+        <osm-tag key="amenity" value="fountain" zoom-appear="15" />
+        <osm-tag key="historic" value="monument" zoom-appear="15" />
+        <osm-tag key="historic" value="wayside_shrine" zoom-appear="16" />
+        <osm-tag key="historic" value="boundary_stone" zoom-appear="16" />
+    </pois>
+
+    <!-- ***************************** Ways ***************************** -->
+    <ways>
+        <!-- Roads (TLM_STRASSE). Paths and tracks are the point of a Swiss topo
+             map, so they appear as early as the road classes. -->
+        <osm-tag key="highway" value="motorway" zoom-appear="8" />
+        <osm-tag key="highway" value="motorway_link" zoom-appear="10" />
+        <osm-tag key="highway" value="trunk" zoom-appear="8" />
+        <osm-tag key="highway" value="primary" zoom-appear="9" />
+        <osm-tag key="highway" value="secondary" zoom-appear="10" />
+        <osm-tag key="highway" value="tertiary" zoom-appear="11" />
+        <osm-tag key="highway" value="unclassified" zoom-appear="12" />
+        <osm-tag key="highway" value="residential" zoom-appear="13" />
+        <osm-tag key="highway" value="service" zoom-appear="14" />
+        <osm-tag key="highway" value="road" zoom-appear="12" />
+        <osm-tag key="highway" value="track" zoom-appear="12" />
+        <osm-tag key="highway" value="path" zoom-appear="12" />
+        <osm-tag key="route" value="ferry" zoom-appear="10" />
+
+        <!-- Rail + aerialways (TLM_EISENBAHN, TLM_UEBRIGE_BAHN) -->
+        <osm-tag key="railway" value="rail" zoom-appear="10" />
+        <osm-tag key="railway" value="narrow_gauge" zoom-appear="12" />
+        <osm-tag key="aerialway" value="cable_car" zoom-appear="12" />
+        <osm-tag key="aerialway" value="gondola" zoom-appear="12" />
+        <osm-tag key="aerialway" value="chair_lift" zoom-appear="13" />
+        <osm-tag key="aerialway" value="drag_lift" zoom-appear="13" />
+        <osm-tag key="aerialway" value="goods" zoom-appear="14" />
+
+        <!-- Watercourses (TLM_FLIESSGEWAESSER) -->
+        <osm-tag key="waterway" value="river" zoom-appear="10" />
+        <osm-tag key="waterway" value="canal" zoom-appear="12" />
+        <osm-tag key="waterway" value="stream" zoom-appear="13" />
+        <osm-tag key="intermittent" renderable="false" value="yes" />
+
+        <!-- Land cover (TLM_BODENBEDECKUNG) -->
+        <osm-tag key="natural" value="water" zoom-appear="8" />
+        <osm-tag key="natural" value="glacier" zoom-appear="9" />
+        <osm-tag key="natural" value="wood" zoom-appear="10" />
+        <osm-tag key="natural" value="bare_rock" zoom-appear="10" />
+        <osm-tag key="natural" value="scree" zoom-appear="12" />
+        <osm-tag key="natural" value="scrub" zoom-appear="12" />
+        <osm-tag key="natural" value="wetland" zoom-appear="12" />
+
+        <!-- Buildings (TLM_GEBAEUDE_FOOTPRINT) and walls (TLM_MAUER) -->
+        <osm-tag key="building" value="yes" zoom-appear="15" />
+        <osm-tag key="barrier" value="wall" zoom-appear="16" />
+
+        <!-- Contours (gdal_contour; see src/topovert/contour.py). The bold
+             index lines survive further out than the intermediate ones. -->
+        <osm-tag key="contour" value="elevation" zoom-appear="11" />
+        <osm-tag key="contour_ext" value="elevation_major" zoom-appear="11" />
+        <osm-tag key="contour_ext" value="elevation_minor" zoom-appear="13" />
+    </ways>
+</tag-mapping>
