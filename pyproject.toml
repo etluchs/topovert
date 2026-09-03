@@ -5,16 +5,16 @@ build-backend = "hatchling.build"
 [project]
 name = "topovert"
 version = "0.1.0"
-description = "Convert Swisstopo topographic data into Garmin-installable .IMG map files"
+description = "Convert Swisstopo topographic data into Garmin .IMG or Wahoo (mapsforge) maps"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "Marcus Schulte" }]
-keywords = ["garmin", "swisstopo", "gis", "mkgmap", "topographic", "dem"]
+keywords = ["garmin", "wahoo", "swisstopo", "gis", "mkgmap", "mapsforge", "topographic", "dem"]
 
 # Runtime intentionally has ZERO Python dependencies: topovert shells out to the
-# GDAL command-line utilities and to mkgmap (Java), and uses only the stdlib
-# (urllib, zipfile, subprocess, ...) for everything else. System requirements
+# GDAL command-line utilities and to mkgmap / osmosis (Java), and uses only the
+# stdlib (urllib, zipfile, lzma, subprocess, ...) for everything else. System requirements
 # (GDAL CLI, a Java >= 1.8 runtime) are checked at runtime, not pip-installed.
 dependencies = []
 

@@ -15,7 +15,8 @@ one:
 The GPKG intermediate is what preserves the source CRS exactly (GeoJSON's
 RFC 7946 WGS84 assumption is lossy), so the reprojection step is unambiguous.
 
-Each contour way is tagged ``contour=elevation`` + ``ele=<m>`` and classified
+Each contour way is tagged ``contour=elevation`` + ``ele=<m>`` (repeated as
+``ref`` for the Wahoo output, see :func:`contour_tags`) and classified
 ``contour_ext=elevation_major`` (every ``MAJOR_EVERY``-th line, drawn bold) or
 ``elevation_minor``; the bundled style maps those to Garmin contour line types.
 """
@@ -69,8 +70,17 @@ def contour_tags(ele: float, *, interval: int, major_every: int) -> dict[str, st
     a bold index line (``elevation_major``) when its step is a multiple of
     ``major_every``, else ``elevation_minor`` — the style renders the two
     differently.
+
+    The metre value is repeated in ``ref`` for the Wahoo output. mapsforge stores
+    an elevation on *POIs* only, so a contour way's ``ele`` would not survive into
+    the ``.map`` and the device could not label the line; ``ref`` is a field ways
+    do have. It is deliberately not ``name``: mkgmap's ``name`` action sets a
+    label only when one is not already set, so writing a metre name here would
+    suppress the ``conv:m=>ft`` conversion the Garmin path needs (see the styles
+    and the "Garmin stores contour elevations in feet" gotcha in CLAUDE.md).
     """
-    tags = {"contour": "elevation", "ele": str(int(round(ele)))}
+    metres = str(int(round(ele)))
+    tags = {"contour": "elevation", "ele": metres, "ref": metres}
     is_major = (
         interval > 0
         and major_every > 0

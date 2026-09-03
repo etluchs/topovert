@@ -13,12 +13,15 @@ Key features are:
  - Easy selection of base maps (area, geodata, scale, ...) based on what Swisstopo offers (use their selection tooling if possible)
  - Runs on any OS (Linux, OSX, Windows) as a local command-line tool. (A browser/WASM front-end was
    explored but is incompatible with the GDAL + JVM toolchain v1 relies on.)
- - Produces .IMG files ready to install on Garmin navigation gear.
+ - Produces .IMG files ready to install on Garmin navigation gear, or mapsforge map tiles for
+   Wahoo ELEMNT/BOLT/ROAM bike computers (`--format wahoo`) — same data, same pipeline, one switch.
 
 ## Status
 
-v1 turns freely available Swisstopo data into a Garmin `.IMG`. It is a thin Python orchestrator
-(stdlib only) around the **GDAL** command-line tools, **mkgmap**, and **splitter**:
+v1 turns freely available Swisstopo data into a Garmin `.IMG` — or, with `--format wahoo`, into
+map tiles for a Wahoo bike computer. It is a thin Python orchestrator (stdlib only) around the
+**GDAL** command-line tools, **mkgmap** and **splitter** (Garmin), and **osmosis** with the
+**mapsforge map-writer** plugin (Wahoo):
 
 - A local directory of **swissALTI3D** GeoTIFF elevation tiles (EPSG:2056 / LV95) becomes a
   **hill-shaded** map (`--dem-dir`).
@@ -40,17 +43,55 @@ v1 turns freely available Swisstopo data into a Garmin `.IMG`. It is a thin Pyth
 - A bundled **Swiss topographic style + TYP** colours the output (forest, rock, glacier and water
   fills; red paths; brown contours; Swiss-tuned road/rail rendering) so the map is legible on-device
   out of the box.
+- **Wahoo output** (`--format wahoo`): the same DEM/vector/contour data compiled to mapsforge
+  `.map.lzma` tiles on Wahoo's zoom-8 grid, ready to copy into an ELEMNT/BOLT/ROAM. Everything up to
+  the intermediate OSM is shared with the Garmin path, so contours, swissTLM3D features and area
+  selection all work identically — see [Wahoo maps](#wahoo-maps-elemnt-bolt-roam) for what differs
+  (no hillshade, and the styling is installed on the device).
+- **Prebuilt Switzerland maps as downloads**: a contour-only and a contours+hillshade `.IMG` are
+  built in CI and attached to a GitHub Release, so the common case needs no local toolchain at all.
+- **Auto-download swissTLM3D** (`--tlm-release`): fetch the national vector GeoDatabase straight from
+  swisstopo's open-data STAC API instead of downloading it by hand — `latest`, or a pinned release id
+  for reproducible builds. It's a ~2.9 GB download (≈10 GB extracted), cached under `~/.cache/topovert`.
 - **Auto-download the DEM for an area** (`--dem-area`): instead of supplying local tiles, name an
   area (`switzerland`) or a WGS84 bbox and topovert fetches the covering **Copernicus GLO-30**
   (~30 m) GeoTIFF tiles into a cache and builds from them. All of Switzerland is 18 tiles (~730 MB).
 
 Full **swissTLM3D / swissALTI3D STAC** area selection is the planned next step.
 
+## Download a prebuilt Switzerland map
+
+Don't want to install GDAL and Java? Grab a ready-made map from the
+[Releases page](../../releases) and skip everything below:
+
+| File | Contents | Size | Best for |
+|---|---|---|---|
+| `topovert-switzerland-contours.img` | Contour lines (20 m, every 5th a bold index line) | small | **Devices** (Fenix, Edge, …) |
+| `topovert-switzerland-contours-hillshade.img` | The same contours **plus** an embedded country-wide DEM for shaded relief | large | **Desktop** (QMapShack / BaseCamp) |
+
+Copy the `.img` into your device's `Garmin/` folder and restart it. Both are
+transparent overlays built from the open Copernicus GLO-30 DEM, so they draw on
+top of your existing base map.
+
+> [!WARNING]
+> **Check the hillshade map on the desktop before putting it on a device.** It
+> embeds a whole-country DEM across many map tiles, and a comparable
+> whole-Switzerland map crashed a Garmin Edge 1040 badly enough to require a full
+> device reset (`topovert-qg3`, cause not yet isolated). For devices, prefer the
+> contour-only file.
+
+These prebuilt maps are DEM-derived only — **no roads, buildings, land cover or
+POIs**, since those need the large manual swissTLM3D download. For a map with
+vector features, build it yourself with `--tlm` as shown below.
+
 ## Requirements
+
+Only needed if you're building maps yourself (the prebuilt downloads above need none of this):
 
 - Python ≥ 3.11
 - GDAL command-line tools (with the SRTMHGT driver) on `PATH`
-- A Java runtime ≥ 1.8 (mkgmap is auto-downloaded into `~/.cache/topovert/` on first run)
+- A Java runtime ≥ 1.8 (mkgmap/splitter — and for `--format wahoo`, osmosis + the mapsforge
+  map-writer plugin — are auto-downloaded into `~/.cache/topovert/` on first run)
 
 ## Usage
 
@@ -66,6 +107,11 @@ uv run topovert build --dem-dir ./swissalti3d_tiles \
 
 # Vector-only (no DEM); large extents are tiled with splitter automatically
 uv run topovert build --tlm ./SWISSTLM3D_CHLV95LN02.gdb --out ./out/swiss.img
+
+# No local swissTLM3D? Auto-download it from swisstopo's STAC API (~2.9 GB,
+# cached). 'latest' takes the newest release; pin an id for a reproducible build.
+uv run topovert build --tlm-release latest --dem-area switzerland --contours \
+    --out ./out/swiss-full.img
 
 # Add elevation contour lines from the DEM (20 m spacing by default)
 uv run topovert build --dem-dir ./swissalti3d_tiles --contours --out ./out/swiss.img
@@ -83,6 +129,12 @@ uv run topovert render-contours --dem-area "8.0,46.55,8.1,46.65" --out ./out/pat
 uv run topovert render-contours --dem-dir ./swissalti3d_tiles --bbox 8.0,46.55,8.1,46.65 \
     --out ./out/patch.svg
 
+# Build for a Wahoo ELEMNT/BOLT/ROAM instead: --out is a *directory* of map tiles
+uv run topovert build --dem-area "8.0,46.55,8.6,46.85" --contours \
+    --format wahoo --out ./out/wahoo-alps
+uv run topovert build --tlm ./SWISSTLM3D_CHLV95LN02.gdb --dem-area switzerland --contours \
+    --format wahoo --out ./out/wahoo-switzerland
+
 # Fine-tune the style: serve a live legend of every element (swatch + tags + type
 # code) and edit styles/topovert_typ.txt — the browser hot-reloads on save.
 uv run topovert legend                         # http://127.0.0.1:8000 (Ctrl-C to stop)
@@ -90,7 +142,8 @@ uv run topovert legend --out ./out/legend.html # or a standalone HTML file, no s
 ```
 
 Then copy the `.IMG` to your Garmin device (or load it in BaseCamp) to see the shaded relief.
-Run `topovert build --help` for options (resolution, resampling, source EPSG, `--tlm`/`--tlm-layer`,
+Run `topovert build --help` for options (resolution, resampling, source EPSG, `--format`,
+`--tlm`/`--tlm-release`/`--tlm-layer`,
 `--contours`/`--contour-interval`, `--no-hillshade`, `--max-heap`, `--opaque`),
 `topovert render-contours --help` to preview contours for a patch as an SVG, or
 `topovert legend --help` to preview/tune the style in a browser.
@@ -102,6 +155,53 @@ Run `topovert build --help` for options (resolution, resampling, source EPSG, `-
 > **Large builds run faster with more JVM heap.** On a country-scale map mkgmap warns that it is
 > throttling to a single job under the default heap; pass e.g. `--max-heap 8g` (sized to your RAM) to
 > let mkgmap/splitter parallelise. It is off by default, so small builds are unaffected.
+
+## Wahoo maps (ELEMNT, BOLT, ROAM)
+
+`--format wahoo` swaps the last step of the pipeline: instead of mkgmap producing one Garmin
+`.IMG`, osmosis and the **mapsforge map-writer** produce the `.map.lzma` tiles Wahoo's firmware
+reads. Everything before that — DEM download, swissTLM3D tagging, contour extraction — is identical.
+
+```bash
+uv run topovert build --dem-area "8.0,46.55,8.6,46.85" --contours \
+    --format wahoo --out ./out/wahoo-alps
+```
+
+`--out` is a **directory** here, filled with one file per zoom-8 map tile:
+
+```
+out/wahoo-alps/133/90.map.lzma
+out/wahoo-alps/133/90.map.lzma.17     # Wahoo's "tile present" marker
+```
+
+Installing on the device takes two steps:
+
+1. **Copy the tiles.** Put the numbered `<x>/` folders into the device's `maps/tiles/8/` folder
+   (`/ELEMNT-BOLT/maps/tiles/8` over adb or MTP; the
+   [elemntary](https://github.com/vti/elemntary) GUI does the same thing). Wahoo caches its map
+   list, so afterwards send the `PURGE` and `RELOAD_MAP` broadcasts (or restart the device).
+2. **Install the theme.** Copy `src/topovert/styles/wahoo/topovert-theme.xml` onto the device as its
+   render theme. Unlike a Garmin TYP, a mapsforge theme is *not* embedded in the map — with the
+   device's stock theme, features it doesn't know (contour lines above all) are simply not drawn.
+
+Three differences from the Garmin output are worth knowing before you build:
+
+- **No hillshade.** A mapsforge map holds no elevation grid and the firmware does no shaded relief,
+  so `--format wahoo` ignores the DEM embed and relies on `--contours` for terrain. A DEM with
+  neither `--contours` nor `--tlm` is rejected rather than silently building an empty map.
+- **The map replaces, it does not overlay.** There is no transparent-overlay mode: a tile you copy
+  across *is* the map for that square, so a contour-only Wahoo map means no roads there. Pair
+  `--contours` with `--tlm`/`--tlm-release` for a map you can navigate on. (Tiles with no data of
+  ours are skipped for the same reason — they would blank the device's own map.)
+- **Contour labels come from `ref`.** The mapsforge format stores an elevation on POIs only, so the
+  metre value rides along in the way's `ref` tag, in **metres** (the metres→feet conversion in the
+  Garmin style exists only because the `.IMG` format stores contour heights in feet).
+
+> [!NOTE]
+> Nothing in the toolchain can verify how a Wahoo device actually draws these maps — the theme is
+> device-side and the firmware is closed. The output is validated against mapsforge's own schemas and
+> map-writer, but the on-device check is still open (`topovert-clv.3`); treat the theme's colours as
+> a starting point and report back what needs tuning.
 
 ## Choosing a DEM source
 
