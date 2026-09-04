@@ -220,6 +220,15 @@ sources with `TOPOVERT_MKGMAP_URL` / `TOPOVERT_SPLITTER_URL` / `TOPOVERT_OSMOSIS
 - **map-writer clips to its own `bbox`**, so running it once per tile over the *whole* OSM is correct
   without pre-cutting the input; it is only O(tiles x input) slow (topovert-clv.5). Verified with two
   runs over the same input and different bboxes.
+- **map-writer's hd mode spills to `/tmp`, not to our workdir** — `java.io.tmpdir`, which the JVM
+  hardcodes to `/tmp` on Linux and does *not* take from `TMPDIR`. hd mode (`type=hd`, switched on
+  above `SPLIT_NODE_THRESHOLD` nodes) keeps nodes/ways off-heap in osmosis'
+  `IndexedObjectStore`/`SimpleObjectStore`, which use `File.createTempFile` with no directory. At
+  country scale that spill is tens of GB, so it blows up a RAM-backed `/tmp` with `No space left on
+  device` — or, where tmpfs quotas are on, `java.io.IOException: Disk quota exceeded`, which reads
+  like a format/size limit but is not. `wahoo.map_writer_cmd(..., tmpdir=)` sets
+  `-Djava.io.tmpdir=<workdir>/javatmp`, on the same (roomy) filesystem the workdir already targets;
+  `build_tiles` clears it between tiles so a failed tile leaves nothing behind.
 - **Validate the two Wahoo XML files against mapsforge's schemas** after editing them — nothing in
   the test suite can (stdlib has no XSD validator), but the `xsi:schemaLocation` in each file names
   the XSD: `xmllint --noout --schema <that URL> src/topovert/styles/wahoo/<file>.xml`. A theme that

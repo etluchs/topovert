@@ -185,3 +185,13 @@ def test_tag_mapping_and_theme_ship_and_parse():
     for path in (wahoo.TAG_CONF_FILE, wahoo.THEME_FILE):
         assert path.is_file(), path
         ET.parse(path)  # raises if malformed
+
+
+def test_map_writer_cmd_puts_the_jvm_temp_dir_where_we_ask(tmp_path):
+    """hd mode spills to java.io.tmpdir, and the JVM hardcodes that to /tmp."""
+    cmd = _cmd(hd=True, max_heap="8g", tmpdir=tmp_path)
+    assert f"-Djava.io.tmpdir={tmp_path}" in cmd
+    # JVM flags must precede the class path / main class
+    assert cmd.index(f"-Djava.io.tmpdir={tmp_path}") < cmd.index("-cp")
+    # unset by default: a small build has no reason to move it
+    assert not any(a.startswith("-Djava.io.tmpdir=") for a in _cmd())

@@ -206,6 +206,7 @@ def map_writer_cmd(
     threads: int = 1,
     hd: bool = False,
     max_heap: str | None = None,
+    tmpdir: Path | None = None,
 ) -> list[str]:
     """Argv for one map-writer run: the whole OSM in, one tile's ``.map`` out.
 
@@ -213,10 +214,22 @@ def map_writer_cmd(
     needed for correctness (it is only a speed question — see topovert-clv.5).
     ``hd`` picks map-writer's hard-disk mode, which trades speed for not holding
     the tile's data in RAM; ``max_heap`` (e.g. ``8g``) sets the JVM ``-Xmx``.
+
+    ``tmpdir`` sets ``java.io.tmpdir``, which is where hd mode actually puts the
+    data it keeps off the heap: it stores nodes/ways in osmosis'
+    ``IndexedObjectStore``/``SimpleObjectStore``, and those call
+    ``File.createTempFile`` with no directory. The JVM hardcodes that to ``/tmp``
+    on Linux and ignores ``TMPDIR``, so on a country-scale build the spill (tens
+    of GB) lands on whatever ``/tmp`` is — often a small RAM-backed tmpfs — and
+    dies with "No space left on device" or, where tmpfs quotas are on,
+    ``java.io.IOException: Disk quota exceeded``. Point it at the workdir, which
+    already sits on the output filesystem for exactly this reason.
     """
     cmd = [java]
     if max_heap is not None:
         cmd.append("-Xmx" + max_heap)
+    if tmpdir is not None:
+        cmd.append("-Djava.io.tmpdir=" + str(tmpdir))
     cmd += [
         "-cp", classpath(osmosis_dir, plugin_jar),
         OSMOSIS_MAIN,
@@ -300,6 +313,11 @@ def build_tiles(
     log.info("Wahoo output: %d zoom-%d tile(s) with data", len(tiles), zoom)
     raw_dir = workdir / "wahoo"
     raw_dir.mkdir(parents=True, exist_ok=True)
+    # hd mode's off-heap spill goes to java.io.tmpdir; keep it off /tmp (see
+    # map_writer_cmd). Cleared between tiles: osmosis deletes its stores on a
+    # clean exit, but a failed tile would otherwise leave tens of GB behind.
+    java_tmp = workdir / "javatmp"
+    java_tmp.mkdir(parents=True, exist_ok=True)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     written: list[MapTile] = []
@@ -310,6 +328,7 @@ def build_tiles(
             map_writer_cmd(
                 java, osmosis_dir, plugin_jar, osm_path, tile, raw_map,
                 tag_conf=tag_conf, threads=threads, hd=hd, max_heap=max_heap,
+                tmpdir=java_tmp,
             ),
             tile,
         )
@@ -323,5 +342,7 @@ def build_tiles(
         (dst.parent / (dst.name + TILE_PRESENT_SUFFIX)).write_bytes(b"")
         if not keep_intermediate:
             raw_map.unlink()
+        for leftover in java_tmp.iterdir():
+            leftover.unlink(missing_ok=True)
         written.append(tile)
     return written
